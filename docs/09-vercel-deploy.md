@@ -5,6 +5,7 @@ Last updated 06-Nov-2026 IST.
 ## Project
 
 - Vercel project `active-management-dashboard`, Git-connected to `ShibayanBiswas/active-management-dashboard`, production branch `main`.
+- `vercel.json` pins the Next.js framework and the Mumbai region; without the pin, a project created from the CLI builds nothing and serves 404.
 - Production URL: https://active-management-dashboard.vercel.app
 
 ## Environment
