@@ -1,0 +1,8 @@
+*.xlsx
+*.xlsm
+!public/samples/*.xlsx
+tests/
+e2e/
+scripts/bake-seed.py
+reports/
+test-results/
