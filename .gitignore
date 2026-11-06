@@ -1,0 +1,36 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+build/
+next-env.d.ts
+*.tsbuildinfo
+
+# env
+.env
+.env*.local
+
+# vercel
+.vercel
+
+# testing
+reports/
+test-results/
+playwright-report/
+blob-report/
+coverage/
+
+# reference workbooks stay on the author machine
+*.xlsx
+*.xlsm
+!public/samples/*.xlsx
+~$*
+
+# python
+__pycache__/
+
+# misc
+.DS_Store
+*.log

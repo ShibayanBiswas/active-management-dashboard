@@ -1,0 +1,67 @@
+name: Production Smoke
+
+on:
+  # Production is live by the time CI on main finishes. Docs and markdown pushes do not run CI, so they do not smoke.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Production Smoke
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_URL: https://active-management-dashboard.vercel.app
+    steps:
+      - name: Wait for the deployment of this commit
+        run: sleep 90
+      - name: Health is ok and the database is connected
+        run: |
+          body=$(curl -fsS --retry 5 --retry-delay 15 "$BASE_URL/api/health")
+          echo "$body"
+          echo "$body" | grep -q '"connected":true'
+          echo "$body" | grep -q '"name":"active_management"'
+      - name: Every desk route answers 200
+        run: |
+          for path in / /observations /scenarios /legs /pricing /intelligence /upload; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --retry 3 "$BASE_URL$path")
+            echo "$path $code"
+            test "$code" = "200"
+          done
+      - name: The book prices
+        run: |
+          curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' "$BASE_URL/api/book/compute" | grep -q '"totals"'
+
+  issue:
+    name: Open An Issue When Production Fails
+    needs: smoke
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create \
+            --title "Production Smoke Failed · $(TZ=Asia/Kolkata date '+%d-%b-%Y %H:%M IST')" \
+            --body "The read-only production checks failed against https://active-management-dashboard.vercel.app. Run: $RUN_URL"

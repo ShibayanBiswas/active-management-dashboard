@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 48" role="img" aria-label="Anand Rathi Wealth">
+  <defs>
+    <linearGradient id="ar-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e5cf94"/>
+      <stop offset="45%" stop-color="#d4b24c"/>
+      <stop offset="100%" stop-color="#b8860b"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="4" width="40" height="40" rx="8" fill="#111111" stroke="url(#ar-gold)" stroke-width="1.5"/>
+  <text x="20" y="31" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="18" font-weight="700" fill="url(#ar-gold)">AR</text>
+  <text x="50" y="20" font-family="system-ui, sans-serif" font-size="11" font-weight="600" letter-spacing="0.22em" fill="#555555">ANAND RATHI</text>
+  <text x="50" y="36" font-family="Georgia, 'Times New Roman', serif" font-size="15" font-weight="700" fill="#111111">Wealth</text>
+</svg>

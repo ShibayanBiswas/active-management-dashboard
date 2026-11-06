@@ -1,0 +1,39 @@
+name: Playwright Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Deployment to smoke; empty builds and starts this commit on 3006
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Chromium Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      BASE_URL: ${{ inputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - if: ${{ inputs.url == '' }}
+        run: npm run build
+      - run: npm run e2e:smoke
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          retention-days: 3
+          path: reports
+          if-no-files-found: ignore
