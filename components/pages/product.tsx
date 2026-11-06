@@ -150,7 +150,7 @@ function ProductDesk({ book, row, inputs }: { book: Book; row: BookRow; inputs: 
           <SectionTitle>Expected Difference At Maturity</SectionTitle>
           {e ? (
             <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 font-ui text-sm">
-              <dt className="text-muted">Grown Mobilisation At Maturity</dt>
+              <dt className="text-muted">Grown Mobilization At Maturity</dt>
               <dd className="text-right tabular-nums">{formatRupees(e.grownMobilisationAtMaturity)}</dd>
               <dt className="text-muted">Grown Premium At Maturity</dt>
               <dd className="text-right tabular-nums">{formatRupees(e.grownPremiumAtMaturity)}</dd>

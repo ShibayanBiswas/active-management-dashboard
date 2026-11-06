@@ -46,7 +46,9 @@ function modules(book: Book, data: DeskData, inputs: DeskInputs): Module[] {
       flow: ["Product Master Observation Dates", "Nifty Close On Each Date", "Average So Far", "Done, Total And Pending", "Residual Target"],
       insights: [
         `${live.length} products have observations live and ${pending} observations are still pending across the book.`,
+        "Average So Far is the mean of the Nifty closes on the observation dates already passed.",
         "Residual Target is Target times Total minus Average So Far times Done, divided by Pending; with nothing pending it shows a dash, never a division by zero.",
+        "Status is Observations Done when every date is observed, Not Started when none is, and Observations Live in between.",
         "Fixings come from the Nifty close on the date, or the last close before it within a week when the date was a holiday.",
       ],
       outputs: [
@@ -61,9 +63,14 @@ function modules(book: Book, data: DeskData, inputs: DeskInputs): Module[] {
       title: "Surface Pricing And Market Check",
       tone: "cyan",
       icon: LineChart,
-      flow: ["Unique Strike, Expiry, Option, Side", "Surface Vol Interpolated", "Plus Or Minus Bid Ask Spread", "Black Scholes Price And Delta", "Market Bid And Ask From Option Chains"],
+      flow: ["Unique Strike, Expiry, Option, Side", "Surface Vol Interpolated", "Plus Or Minus Bid And Ask Spread", "Black Scholes Price And Delta", "Market Bid And Ask From Option Chains"],
       insights: [
         `${keys.length} unique pricing keys cover ${data.products.reduce((s, p) => s + p.legs.length, 0)} legs; each key is priced once.`,
+        "Surface vol is linear in strike within each expiry row, where strikes are moneyness times the reference level, then linear in time between the bracketing expiries.",
+        "Model vol is surface vol plus the Bid And Ask Spread for an original Sell and minus it for a Buy.",
+        "Price is Black Scholes on the forward: forward is Nifty times e to the forward rate times years, discounted at the forward rate plus the discount spread.",
+        "Delta is the Black Scholes delta at the delta rate; expired legs settle at intrinsic value on the Nifty close of the expiry date.",
+        "Market price interpolates the option chain between the bracketing strikes: the ask for an original Sell, the bid for a Buy.",
         `Forward ${formatPct(inputs.forwardRate)}, discount ${formatPct(inputs.forwardRate + inputs.discountSpread)}, delta at ${formatPct(inputs.deltaRate)}, all editable under Pricing Parameters.`,
         quoted.length
           ? `${quoted.length} live keys have a market quote; the median model minus market gap is ${formatNumber(gaps.sort((a, b) => a - b)[Math.floor(gaps.length / 2)])}.`
@@ -81,10 +88,14 @@ function modules(book: Book, data: DeskData, inputs: DeskInputs): Module[] {
       title: "NBFC Book And Capped IRR",
       tone: "purple",
       icon: Wallet,
-      flow: ["Net Mobilisation", "Grown Mobilisation, Premium And Margin", "Plus Option Outflow", "Unwind Price Per Debenture", "IRR Capped At Max IRR"],
+      flow: ["Net Mobilization", "Grown Mobilization, Premium And Margin", "Plus Option Outflow", "Unwind Price Per Debenture", "IRR Capped At Max IRR"],
       insights: [
-        "Net Mobilisation is Mobilisation times one minus Margin, IB, Transaction Cost and Issuance Cost; each pot grows at its own rate to the valuation date.",
-        `Max IRR is one plus Coupon raised to 365 over Tenor Days, minus one; ${capped} products have their current IRR capped.`,
+        "Net Mobilization is Mobilization times one minus Margin Percent, IB, Transaction Cost and Issuance Cost.",
+        "Each pot grows as amount times one plus its rate raised to days since allotment over 365: Net Mobilization at the Product Rate, Premium at the Premium Rate, Margin at the Margin Rate.",
+        "Option Outflow is price times signed quantity over every leg, plus simple interest at the Premium Rate on expiry payoffs already settled.",
+        "Unwind Price is the grown pots plus Option Outflow, divided by Debentures, where Debentures is Mobilization over Face Value; Exit Value is Unwind Price times Debentures.",
+        "IRR is Unwind Price over Face Value raised to 365 over days since allotment, minus one.",
+        `Max IRR is one plus Coupon raised to 365 over Tenor Days, minus one; Current IRR and IRR At Assumed Level are capped at it, and ${capped} products are capped today.`,
         badMaster ? `${badMaster} products have a missing or zero Coupon or Tenor in the master and are flagged.` : "Every product has a usable Coupon and Tenor.",
       ],
       outputs: [
@@ -116,9 +127,12 @@ function modules(book: Book, data: DeskData, inputs: DeskInputs): Module[] {
       title: "Expected Difference At Maturity",
       tone: "amber",
       icon: Scale,
-      flow: ["Grown Mobilisation, Premium And Margin", "Grown To Maturity At Their Rates", "Minus Face Value x One Plus Coupon x Debentures", "Minus Open Option Outflow Grown At Premium Rate"],
+      flow: ["Grown Mobilization, Premium And Margin", "Grown To Maturity At Their Rates", "Minus Face Value Times One Plus Coupon Times Debentures", "Minus Open Option Outflow Grown At Premium Rate"],
       insights: [
         "If the residual tenure earns interest only, this is what the book has left at maturity after redemption and the still open option outflow.",
+        "Interest Only Book At Maturity is each grown pot grown again at its own rate for the days from valuation to maturity.",
+        "Contractual Terminal is Face Value times one plus Coupon times Debentures, the Unwinding Calculator redemption convention.",
+        "Expected Difference is Interest Only Book At Maturity minus Contractual Terminal minus the open option outflow grown to maturity at the Premium Rate.",
         `${noOpenGreen} of ${noOpen.length} products with no open legs read close to zero; anything else points at the master rates, costs or coupon.`,
         `${tones.filter((t) => t === "red").length} products are red, ${tones.filter((t) => t === "amber").length} amber and ${tones.filter((t) => t === "green").length} green.`,
       ],
@@ -192,7 +206,7 @@ export function IntelligencePage() {
               <p className="intel-hero-kicker">Active Management Desk</p>
               <p className="intel-hero-title">Valuation {formatDeskDate(inputs.valuationDate)} · Nifty {formatNumber(inputs.currentNifty)}</p>
               <p className="intel-hero-sub">
-                {book.totals.products} products, {formatCrore(book.totals.mobilisation)} crore mobilised, priced on the {data.surface.label} with {data.chains.length} option chains.
+                {book.totals.products} products, {formatCrore(book.totals.mobilisation)} crore mobilized, priced on the {data.surface.label} with {data.chains.length} option chains.
               </p>
               <div className="intel-hero-meta">
                 <span className="intel-hero-badge">{data.source === "mongo" ? "Live Book" : "Demo Book"}</span>

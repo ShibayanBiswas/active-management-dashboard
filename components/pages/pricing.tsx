@@ -40,7 +40,7 @@ function PricingDesk({ book, data, inputs }: { book: Book; data: DeskData; input
     { id: "expiry", label: "Expiry", render: (k) => formatDeskDate(k.expiry), sort: (k) => k.expiry },
     { id: "side", label: "Original Side", render: (k) => k.side, sort: (k) => k.side },
     { id: "surface", label: "Surface Vol", align: "right", render: (k) => formatPct(k.surfaceVol), sort: (k) => k.surfaceVol },
-    { id: "spread", label: "Bid Ask Spread", align: "right", render: (k) => formatPct(k.spread), sort: (k) => k.spread },
+    { id: "spread", label: "Bid And Ask Spread", align: "right", render: (k) => formatPct(k.spread), sort: (k) => k.spread },
     { id: "vol", label: "Model Vol", align: "right", render: (k) => formatPct(k.modelVol), sort: (k) => k.modelVol },
     { id: "price", label: "Model Price", align: "right", render: (k) => formatNumber(k.price), sort: (k) => k.price },
     { id: "bid", label: "Market Bid", align: "right", render: (k) => formatNumber(k.marketBid), sort: (k) => k.marketBid },
@@ -141,7 +141,7 @@ function PricingDesk({ book, data, inputs }: { book: Book; data: DeskData; input
               </li>
             ))}
           </ul>
-          <SectionTitle>Bid Ask Spread By Expiry</SectionTitle>
+          <SectionTitle>Bid And Ask Spread By Expiry</SectionTitle>
           <ul className="grid grid-cols-2 gap-1 text-xs">
             {data.bidAsk
               .filter((b) => b.expiry >= inputs.valuationDate)

@@ -18,7 +18,7 @@ export function ExpectedDifferenceCell({ unwind, mobilisation }: { unwind: Produ
   if (!e) return <span className="text-muted">-</span>;
   const tone = expectedDifferenceTone(e.difference, mobilisation);
   const tip = [
-    `Grown Mobilisation At Maturity ${formatRupees(e.grownMobilisationAtMaturity)}`,
+    `Grown Mobilization At Maturity ${formatRupees(e.grownMobilisationAtMaturity)}`,
     `Grown Premium At Maturity ${formatRupees(e.grownPremiumAtMaturity)}`,
     `Grown Margin At Maturity ${formatRupees(e.grownMarginAtMaturity)}`,
     `Interest Only Book At Maturity ${formatRupees(e.interestOnlyBookAtMaturity)}`,

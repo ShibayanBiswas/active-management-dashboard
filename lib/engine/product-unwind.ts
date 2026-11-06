@@ -87,7 +87,7 @@ export function productUnwind(product: Product, legs: LegValue[], valuationDate:
   const face = n(product.faceValue);
   const coupon = n(product.coupon);
   const tenor = n(product.tenorDays);
-  if (mob == null || mob <= 0) warnings.push("Mobilisation Missing Or Not Positive");
+  if (mob == null || mob <= 0) warnings.push("Mobilization Missing Or Not Positive");
   if (face == null || face <= 0) warnings.push("Face Value Missing Or Not Positive");
   if (coupon == null || coupon <= 0) warnings.push("Coupon Missing Or Zero In Master");
   if (tenor == null || tenor <= 0) warnings.push("Tenor Missing Or Not Positive In Master");
