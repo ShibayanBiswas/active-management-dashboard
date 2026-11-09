@@ -1,12 +1,44 @@
 import { NextResponse } from "next/server";
 
-import { loadDeskData } from "@/lib/data/load";
+import { looksLikeSurface, persistActiveSurface, toPlainSurface } from "@/lib/data/load";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** Active volatility surface and bid ask spread table. */
-export async function GET() {
-  const { surface, bidAsk } = await loadDeskData();
-  return NextResponse.json({ surface, bidAsk }, { headers: { "Cache-Control": "no-store, max-age=0" } });
+export async function POST(req: Request) {
+  try {
+    const body = await req.json().catch(() => null);
+    if (!looksLikeSurface(body)) {
+      return NextResponse.json(
+        {
+          error: "Volatility Surface is incomplete",
+          issues: ["Keep at least one expiry row and the Deep strike column before saving."],
+        },
+        { status: 400 },
+      );
+    }
+
+    const surface = toPlainSurface(body);
+    if (!surface.expiries.length) {
+      return NextResponse.json(
+        {
+          error: "Volatility Surface has no expiry rows",
+          issues: ["Add at least one expiry date before saving."],
+        },
+        { status: 400 },
+      );
+    }
+
+    const persisted = await persistActiveSurface(surface, "desk-edit");
+    return NextResponse.json({ ok: true, surface, persisted });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Desk database write failed";
+    return NextResponse.json(
+      {
+        error: "The Volatility Surface could not be saved.",
+        issues: [message],
+      },
+      { status: 500 },
+    );
+  }
 }

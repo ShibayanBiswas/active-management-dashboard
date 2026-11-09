@@ -1,5 +1,5 @@
-import { IntelligencePage } from "@/components/pages/intelligence";
+import { LogicAtlasPage } from "@/components/dashboard/logic-atlas-page";
 
 export default function Page() {
-  return <IntelligencePage />;
+  return <LogicAtlasPage />;
 }

@@ -1,4 +1,4 @@
-import { NAV_ITEMS } from "@/lib/navigation";
+import { mainSections } from "@/lib/navigation";
 
 /**
  * SP Workstation frames this app and asks it to change tab with postMessage, so a sidebar click does not reload the
@@ -10,7 +10,10 @@ const PARENT_ORIGIN = "https://sp-workstation.vercel.app";
 /** SP Workstation dev server on port 3000. Never accepted in a production build. */
 const LOCAL_PARENT_ORIGINS = new Set(["http://localhost:3000", "http://127.0.0.1:3000"]);
 
-const ROUTES = new Set(NAV_ITEMS.map((item) => item.href));
+/** Every nav route: Home, Portfolio and its two pages, Intelligence, Upload. */
+const ROUTES = new Set(
+  mainSections.flatMap((section) => [section.href, ...(section.subNav ?? []).map((sub) => sub.href)]),
+);
 
 type EmbedEvent = Pick<MessageEvent, "source" | "origin" | "data">;
 

@@ -1,5 +1,5 @@
-import { BookSummaryPage } from "@/components/pages/book-summary";
+import { MultiHomePage } from "@/components/multi/multi-home-page";
 
 export default function Page() {
-  return <BookSummaryPage />;
+  return <MultiHomePage />;
 }

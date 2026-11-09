@@ -1,5 +1,5 @@
 /** Standard normal cumulative distribution via Abramowitz and Stegun. */
-function normCdf(x: number): number {
+export function normCdf(x: number): number {
   if (!Number.isFinite(x)) return x > 0 ? 1 : 0;
   const a1 = 0.254829592;
   const a2 = -0.284496736;
@@ -14,7 +14,7 @@ function normCdf(x: number): number {
   return 0.5 * (1 + sign * y);
 }
 
-type BsInput = {
+export type BsInput = {
   spot: number;
   strike: number;
   tauYears: number;

@@ -1,8 +1,8 @@
 *.xlsx
 *.xlsm
 !public/samples/*.xlsx
-tests/
-e2e/
-scripts/bake-seed.py
+# Rebuilt on Vercel by the build script, so it is not uploaded
+public/samples/Product_Master_Input_Multiple_Products_Repeated_Rows.xlsx
+logs/
 reports/
 test-results/

@@ -1,0 +1,23 @@
+{
+  "inputs": {
+    "debentures": 800,
+    "unwindDate": "2025-02-21T00:00:00",
+    "spot": 22800
+  },
+  "expected": {
+    "unwindQuotePct": 1.471781630532424,
+    "unwindQuoteRs": 183972.703816553,
+    "productIRR": 0.1444597037096398,
+    "clientIRR": 0.23053055350878426,
+    "residualIRR": 0.09819745086824883,
+    "amountWithNbfc": 0.907674763298555,
+    "nbfcGrown": 1.0365012581321735,
+    "premium": 0.5353413402415197,
+    "premGrown": 0.5873229043604778,
+    "premOutflow": -0.15204253196022727,
+    "pricerUnwind": 1.471781630532424,
+    "investedTenor": 680,
+    "optionPremium0": -4457.31,
+    "optionPrice0": 684.61
+  }
+}

@@ -13,7 +13,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>("light");
 
   useEffect(() => {
-    const stored = localStorage.getItem("am-theme") as Theme | null;
+    const stored = localStorage.getItem("uc-theme") as Theme | null;
     if (stored === "dark" || stored === "light") {
       setTheme(stored);
       document.documentElement.classList.toggle("dark", stored === "dark");
@@ -26,7 +26,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       toggle: () => {
         setTheme((t) => {
           const next = t === "dark" ? "light" : "dark";
-          localStorage.setItem("am-theme", next);
+          localStorage.setItem("uc-theme", next);
           document.documentElement.classList.toggle("dark", next === "dark");
           return next;
         });

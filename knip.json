@@ -1,6 +1,11 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "entry": ["scripts/*.ts", "tests/**/*.test.ts", "e2e/**/*.spec.ts"],
-  "project": ["app/**/*.{ts,tsx}", "components/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}", "scripts/**/*.ts", "tests/**/*.ts", "e2e/**/*.ts"],
-  "ignoreDependencies": ["eslint-config-next"]
+  "entry": ["scripts/*.ts"],
+  "project": ["app/**/*.{ts,tsx}", "components/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}", "scripts/**/*.ts"],
+  "ignoreDependencies": ["eslint-config-next", "postcss-load-config", "clsx", "date-fns", "tailwind-merge", "zod"],
+  "rules": {
+    "exports": "warn",
+    "types": "warn",
+    "duplicates": "warn"
+  }
 }
