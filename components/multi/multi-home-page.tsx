@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { DeskBookExplorer } from "@/components/dashboard/desk-book-explorer";
+import { AssumedLevelInputs } from "@/components/multi/assumed-level-inputs";
 import { MultiProductTable } from "@/components/multi/multi-product-table";
 import { PostObservationTable } from "@/components/multi/post-observation-table";
 import { AppPage, Panel, SectionTitle, SpecRail } from "@/components/layout/app-ui";
@@ -118,6 +119,7 @@ export function MultiHomePage() {
           <HorizontalBand>
             <Panel>
               <SectionTitle icon={Sparkles}>Product Book</SectionTitle>
+              <AssumedLevelInputs />
               <MultiProductTable />
             </Panel>
           </HorizontalBand>

@@ -1,3 +1,5 @@
+import { PRODUCT_BOOK_HEADERS } from "@/lib/workbook/export-columns";
+
 /**
  * Columns that may club consecutive identical values inside a strike group.
  * Priced / per-expiry columns are excluded so equal rounded marks never hide a row.
@@ -18,8 +20,13 @@ export const PRICER_MERGE_COLS = [
 /**
  * Excel and PDF only. The screen blanks a repeated value in every column instead.
  * Shared cells club. A priced cell merges only when the number is the same.
+ * Every column clubs inside a product except the two per-leg marks. The Active Management
+ * columns are one value per product, so they club across its legs like the quote columns.
  */
-export const PRODUCT_BOOK_MERGE_COLS: readonly number[] = Array.from({ length: 31 }, (_, index) => index);
+const PER_LEG_MARK_HEADERS: ReadonlySet<string> = new Set(["Unwind Option Price", "Premium Outflow Amount"]);
+export const PRODUCT_BOOK_MERGE_COLS: readonly number[] = PRODUCT_BOOK_HEADERS.flatMap((header, index) =>
+  PER_LEG_MARK_HEADERS.has(header) ? [] : [index],
+);
 
 /** Options Book headers (11 cols). Group by strike (col 1). Quantity Rounded is not shown. */
 export const OPTION_BOOK_MERGE_COLS = [

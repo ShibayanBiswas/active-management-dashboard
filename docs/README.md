@@ -21,6 +21,7 @@ product desk removed.
 | 08 | [Change log](08-changelog.md) | Dated entries, newest first |
 | 09 | [Vercel deploy](09-vercel-deploy.md) | Vercel project, env values, CI and Production Smoke, SP Workstation embed |
 | 10 | [Master tally](10-master-tally.md) | Eight FY workbooks, New Primary observations, and the unwinding master |
+| 11 | [Active Management layer](11-active-management.md) | Observations, Actual and Effective Target, Current and Expected rates, observation progress tabs, Assumed Levels, the per-product Black Scholes Pricer and Scenario Grid |
 
 ## Suggested paths
 

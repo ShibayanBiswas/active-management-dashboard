@@ -282,7 +282,11 @@ Route `/intelligence`. Matches the Primary SP Intelligence layout
 | Unwinding Desk Command | Three equal-width lanes filling the row: Unwinding Calculator, Pricer Table, Upload Desk |
 | Computation Primitives | Full-width table of interpolation, Black–Scholes, FV, IRR, and related blocks |
 
-### Six logic modules
+### Nine logic modules
+
+The Active Management layer adds Observations and targets, Current and expected rates, and
+Scenario grid after the six below, and an Active Management lane; see
+[11](11-active-management.md).
 
 Each pipeline is complete (no orphaned nodes). Node kinds: `input`, `process`, `engine`,
 `lookup`, `output`.

@@ -6,3 +6,4 @@ public/samples/Product_Master_Input_Multiple_Products_Repeated_Rows.xlsx
 logs/
 reports/
 test-results/
+.playwright-mcp/

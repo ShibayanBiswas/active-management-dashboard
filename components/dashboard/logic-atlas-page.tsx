@@ -10,11 +10,14 @@ import {
   CheckCircle2,
   ExternalLink,
   FileSpreadsheet,
+  Gauge,
+  Grid3x3,
   LayoutDashboard,
   LineChart,
   Percent,
   Sigma,
   Sparkles,
+  Target,
   TrendingUp,
   Wallet,
 } from "lucide-react";
@@ -37,7 +40,7 @@ type LogicModule = {
   kicker: string;
   title: string;
   purpose: string;
-  tone: "amber" | "cyan" | "purple" | "green" | "rose" | "gold";
+  tone: "amber" | "cyan" | "purple" | "green" | "rose" | "gold" | "indigo" | "teal" | "fuchsia";
   metrics: Array<{ label: string; value: string }>;
   insights: string[];
   outputs: string[];
@@ -355,6 +358,189 @@ const MODULES: LogicModule[] = [
     ],
   },
   {
+    id: "observations",
+    icon: Target,
+    kicker: "Active Management",
+    title: "Observations and targets",
+    purpose:
+      "A product's observation dates are its option expiry dates. The desk counts how many have passed, averages the index closes so far, and works out the average the dates still left must print to reach the target.",
+    tone: "indigo",
+    metrics: [
+      { label: "Dates", value: "Option expiries" },
+      { label: "Needs", value: "Index closes" },
+      { label: "Role", value: "Progress" },
+    ],
+    insights: [
+      "An expiry on the valuation date counts as passed, the same rule that settles expired options.",
+      "The index closes are the ones the unwind settles expired options at, so one fetch serves both.",
+      "Actual Target is the Target Nifty on the product master. When a product has none, the highest strike among the originally sold puts stands in.",
+      "Effective Target shows a dash when nothing is left to observe or a passed close is missing.",
+    ],
+    outputs: [
+      "Observations Passed",
+      "Observations Left",
+      "Observation Start Date",
+      "Observation End Date",
+      "Average So Far",
+      "Actual Target",
+      "Effective Target",
+    ],
+    pipeline: [
+      {
+        id: "obs-dates",
+        kind: "input",
+        label: "Option expiry dates",
+        description:
+          "The unique expiry dates on the product are its observation dates. The first is the Observation Start Date and the last is the Observation End Date.",
+      },
+      {
+        id: "obs-closes",
+        kind: "lookup",
+        label: "Index closes",
+        description:
+          "The index close on or before each passed date, from the same feed the unwind uses for expired options.",
+      },
+      {
+        id: "obs-count",
+        kind: "process",
+        label: "Passed and left",
+        description:
+          "Dates on or before the valuation date are passed. The rest are left. No date passed and at least one passed are the two Product Book tabs.",
+      },
+      {
+        id: "obs-avg",
+        kind: "process",
+        label: "Average so far",
+        description: "The passed closes are added and divided by the number of dates passed.",
+      },
+      {
+        id: "obs-out",
+        kind: "output",
+        label: "Effective Target",
+        description:
+          "Actual Target times all dates, less the passed closes, divided by the dates left. Before the first date it equals the Actual Target.",
+      },
+    ],
+  },
+  {
+    id: "am-rates",
+    icon: Gauge,
+    kicker: "Active Management",
+    title: "Current and expected rates",
+    purpose:
+      "Current rate is the client rate capped at the product rate. Expected rate runs the whole unwind again at an assumed index level and caps it the same way.",
+    tone: "teal",
+    metrics: [
+      { label: "Rates", value: "2" },
+      { label: "Cap", value: "Product rate" },
+      { label: "Needs", value: "Assumed level" },
+    ],
+    insights: [
+      "The cap is the product rate: Face Value grown at the coupon over the full life.",
+      "A product with a zero coupon has no cap, so its Current rate is its Client rate.",
+      "Expected rate reprices every live option at the assumed level. Expired options keep the closes they settled at.",
+      "With no assumed level entered, the desk spot is used and Expected rate equals Current rate.",
+      "A quote at or below zero, or an unwind on the allotment date, shows a dash rather than a zero rate.",
+    ],
+    outputs: ["Current Internal Rate of Return", "Expected Internal Rate of Return"],
+    pipeline: [
+      {
+        id: "amr-in",
+        kind: "input",
+        label: "Quote and coupon",
+        description:
+          "The Unwind Quote Amount and Client rate from the live unwind, with the coupon and full life of the product.",
+      },
+      {
+        id: "amr-cur",
+        kind: "process",
+        label: "Current rate",
+        description: "The lower of the Client rate and the Product rate.",
+      },
+      {
+        id: "amr-level",
+        kind: "input",
+        label: "Assumed level",
+        description:
+          "Assumed Nifty Level and Assumed Sensex Level on Home. A blank level uses the desk spot.",
+      },
+      {
+        id: "amr-eng",
+        kind: "engine",
+        label: "Unwind at that level",
+        description:
+          "The same unwind with only the option spot moved. Date, debentures, surface and settled closes stay as they are.",
+      },
+      {
+        id: "amr-out",
+        kind: "output",
+        label: "Expected rate",
+        description: "The Client rate at the assumed level, capped at the Product rate.",
+      },
+    ],
+  },
+  {
+    id: "scenario",
+    icon: Grid3x3,
+    kicker: "Active Management",
+    title: "Scenario grid",
+    purpose:
+      "The selected product is unwound again at twenty-one index levels, one thousand points either side of the valuation-date level in steps of one hundred, with every change in exact rupees.",
+    tone: "fuchsia",
+    metrics: [
+      { label: "Levels", value: "21" },
+      { label: "Step", value: "100 points" },
+      { label: "Role", value: "What if" },
+    ],
+    insights: [
+      "The centre row is the on-screen unwind, so the grid and the Unwinding Calculator always agree.",
+      "Only the option spot moves. The vol surface keeps its reference levels, the way the Pricer Table reads it.",
+      "Expired options stay at the closes they settled at, so a product with every option expired has a flat grid.",
+      "The grid is worked out when its tab is opened, one level at a time, so the page stays responsive.",
+    ],
+    outputs: [
+      "Unwind Quote",
+      "Premium Outflow",
+      "Unwind Value",
+      "Client Internal Rate of Return",
+      "Current Internal Rate of Return",
+      "Residual Internal Rate of Return",
+    ],
+    pipeline: [
+      {
+        id: "scn-in",
+        kind: "input",
+        label: "Valuation level",
+        description: "The desk spot for the product's index on the unwind date.",
+      },
+      {
+        id: "scn-levels",
+        kind: "process",
+        label: "Twenty-one levels",
+        description: "From one thousand points below to one thousand points above, every hundred points.",
+      },
+      {
+        id: "scn-eng",
+        kind: "engine",
+        label: "Full unwind per level",
+        description: "Each level runs the same unwind as the calculator, with only the option spot moved.",
+      },
+      {
+        id: "scn-diff",
+        kind: "process",
+        label: "Change from centre",
+        description: "Each figure less the centre row. Rupee changes are exact to the paisa.",
+      },
+      {
+        id: "scn-out",
+        kind: "output",
+        label: "Scenario grid",
+        description:
+          "Unwind Quote, Premium Outflow, Unwind Value and the rates at every level, each with its change.",
+      },
+    ],
+  },
+  {
     id: "inputs",
     icon: FileSpreadsheet,
     kicker: "Files",
@@ -464,6 +650,18 @@ const PRIMITIVES: Array<{ name: string; category: string; uses: "leg" | number; 
     uses: 3,
     role: "Full life, days invested, and days left drive growth and the three rates",
   },
+  {
+    name: "Rate cap",
+    category: "rate",
+    uses: 2,
+    role: "Current and Expected rates are capped at the Product rate",
+  },
+  {
+    name: "Scenario level",
+    category: "price",
+    uses: 21,
+    role: "The selected product is unwound at twenty-one index levels, one hundred points apart",
+  },
 ];
 
 const DESK_LINKS = [
@@ -491,6 +689,14 @@ const LANES = [
     signals: ["Volatility", "Forward", "Discount", "Delta"],
   },
   {
+    title: "Active Management",
+    accent: "#4f46e5",
+    dataLane: "Observation dates, index closes, the product master's target, and the assumed index levels.",
+    valuationPath: "Current and Expected rates from the same unwind, and a twenty-one level scenario grid for each product.",
+    payoffPath: "Effective Target is the average the observations still left must print to reach the target.",
+    signals: ["Effective Target", "Current rate", "Expected rate", "Scenario grid"],
+  },
+  {
     title: "Upload",
     accent: "#059669",
     dataLane: "The monthly vol surface and the product master. An upload replaces the live desk.",
@@ -507,6 +713,9 @@ const SHELL_TONES: Record<LogicModule["tone"], string> = {
   green: "intel-pipeline-shell--green",
   rose: "intel-pipeline-shell--rose",
   gold: "intel-pipeline-shell--gold",
+  indigo: "intel-pipeline-shell--indigo",
+  teal: "intel-pipeline-shell--teal",
+  fuchsia: "intel-pipeline-shell--fuchsia",
 };
 
 export function LogicAtlasPage() {
@@ -539,7 +748,7 @@ export function LogicAtlasPage() {
           <p className="intel-hero-kicker relative z-10">Anand Rathi Wealth · Desk Intelligence</p>
           <h2 className="intel-hero-title relative z-10">Intel · Logic Atlas</h2>
           <p className="intel-hero-sub relative z-10">
-            How the unwind quote is built.
+            How the unwind quote and the Active Management figures are built.
           </p>
           <div className="intel-hero-meta relative z-10">
             <motion.span

@@ -37,6 +37,9 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run lint:unused
-      # Engine goldens against the workbook fixtures, then the desk invariants.
-      - run: npm run test:ci
+      # Offline engine goldens on the seeds (no Yahoo, no Mongo), then the Active Management add-ons.
+      - run: npm run verify:parity
+      - run: npm run verify:edge
+      - run: npm run verify:pricer
+      - run: npm run verify:am
       - run: npm run build

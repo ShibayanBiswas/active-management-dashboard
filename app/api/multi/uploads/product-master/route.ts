@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { readMultipartWorkbook } from "@/lib/api/read-upload-file";
+import { guardWrite } from "@/lib/api/write-guard";
 import { persistMultiProducts } from "@/lib/data/multi-load";
 import { parseProductMasterBook } from "@/lib/workbook/parse-multi-master";
 import { MAX_UPLOAD_BYTES, validateDeskUpload } from "@/lib/workbook/upload-schema";
@@ -10,6 +11,8 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(req: Request) {
+  const blocked = guardWrite(req, MAX_UPLOAD_BYTES);
+  if (blocked) return blocked;
   const uploaded = await readMultipartWorkbook(req);
   if (!uploaded.ok) {
     return NextResponse.json({ error: uploaded.error, issues: uploaded.issues }, { status: 400 });

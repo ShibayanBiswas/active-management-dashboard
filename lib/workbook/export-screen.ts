@@ -15,9 +15,11 @@ import {
   buildMultiProductBookWorkbook,
   buildPricerScreenWorkbook,
   buildUnwindScreenWorkbook,
+  exportInputRows,
   optionBookRowsFlat,
   pricerTableRowsFlat,
 } from "@/lib/workbook/build-screen-excel";
+import type { AmExportDoc, AmTable, AmValue } from "@/lib/workbook/am-export-columns";
 import { createWorkbook } from "@/lib/workbook/excel-runtime";
 import { unwindProductFactRows } from "@/lib/workbook/product-facts";
 import { loadAutoTable, loadJsPdf } from "@/lib/workbook/pdf-runtime";
@@ -28,12 +30,13 @@ import {
   addExcelKpiTiles,
   addExcelMasthead,
   addExcelSection,
+  autofitExcelColumns,
   excelBox,
   excelFill,
   excelGoldBox,
   excelThin,
 } from "@/lib/workbook/export-theme";
-import type { ExcelCell } from "@/lib/workbook/excel-cells";
+import { writeExcelCell, type ExcelCell } from "@/lib/workbook/excel-cells";
 import type { PricerRow, UnwindResult } from "@/lib/types";
 import {
   computeGroupedRowSpans,
@@ -838,6 +841,139 @@ export async function downloadPricerScreenPdf(rows: PricerRow[], productCode: st
     buildDeskExportFilename({
       screen: "Pricer-Table",
       productCode,
+      extension: "pdf",
+    }),
+  );
+}
+
+/* ── Active Management tabs: Active Management, Black Scholes Pricer, Scenario Grid ── */
+
+function amSubtitle(doc: AmExportDoc, result: UnwindResult): string {
+  return [result.productName, result.productCode, doc.subtitle, screenExportStamp()].filter(Boolean).join(" · ");
+}
+
+/** Native number or date; an explicit format wins over the header-driven one. */
+function writeAmCell(cell: ExcelJS.Cell, value: ExcelCell, header: string, numFmt?: string) {
+  writeExcelCell(cell, value, header);
+  if (numFmt && typeof cell.value === "number") cell.numFmt = numFmt;
+}
+
+/** Unwinding Summary key values, then each value rewritten as a native number or date. */
+function addAmValues(sheet: ExcelJS.Worksheet, startRow: number, rows: AmValue[], toCol: number): number {
+  const next = addKeyValues(sheet, startRow, rows.map((row): [string, string] => [row.label, row.text]), toCol);
+  rows.forEach((row, i) => {
+    writeAmCell(sheet.getCell(startRow + i, 2), row.excel, row.label, row.numFmt);
+    // Long plain-word lines (warnings) wrap inside the merged value cell.
+    if (row.text.length > 90) sheet.getRow(startRow + i).height = 15 * Math.ceil(row.text.length / 90);
+  });
+  return next;
+}
+
+/** Desk data table (header, banding, clubbing), then native values and the shaded base row. */
+function addAmTable(sheet: ExcelJS.Worksheet, startRow: number, table: AmTable): number {
+  const groupCol = table.groupCol ?? 0;
+  const mergeCols = [...(table.mergeCols ?? [])];
+  const next = addDataTable(sheet, startRow, table.headers, table.text, groupCol, undefined, mergeCols);
+  const spans = computeGroupedRowSpans(table.text, mergeCols, groupCol);
+  table.excel.forEach((row, ri) => {
+    row.forEach((value, ci) => {
+      if (spans[ri]?.[ci] === 0) return;
+      const cell = sheet.getCell(startRow + 1 + ri, ci + 1);
+      writeAmCell(cell, value, table.headers[ci] ?? "", table.numFmts[ci]);
+      if (ri === table.highlightRow) {
+        cell.fill = excelFill(EXCEL_THEME.goldSoft);
+        cell.font = { ...cell.font, bold: true, color: { argb: EXCEL_THEME.maroonDeep } };
+      }
+    });
+  });
+  return next;
+}
+
+async function buildActiveManagementWorkbook(doc: AmExportDoc, result: UnwindResult, logoOffset: number) {
+  const wb = await createWorkbook();
+  const cols = Math.max(6, ...doc.sections.map((section) => section.table?.headers.length ?? 0));
+  const ws = wb.addWorksheet(doc.sheetName, { views: [{ showGridLines: false }] });
+  let row = addBanner(ws, doc.title, amSubtitle(doc, result), cols, logoOffset);
+  if (doc.inputs) {
+    const excelInputs = exportInputRows(result);
+    row = addExcelSection(ws, row, "Input Parameters", 1, cols);
+    row = addAmValues(
+      ws,
+      row,
+      inputRows(result).map(([label, text], i) => ({ label, text, excel: excelInputs[i]?.[1] ?? text })),
+      cols,
+    );
+  }
+  for (const section of doc.sections) {
+    row = addExcelSection(ws, row, section.title, 1, cols);
+    if (section.values) row = addAmValues(ws, row, section.values, cols);
+    if (section.table) row = addAmTable(ws, row, section.table);
+  }
+  addDisclaimer(ws, row, cols);
+  autofitExcelColumns(ws);
+  return wb;
+}
+
+/** Excel for one Active Management tab: banner, its sections and the disclaimer on one sheet. */
+export async function downloadActiveManagementExcel(doc: AmExportDoc, result: UnwindResult) {
+  const logo = await fetchBrandLogoBase64();
+  const wb = await buildActiveManagementWorkbook(doc, result, logo ? 3 : 0);
+  if (logo) {
+    const sheet = wb.worksheets[0];
+    if (sheet) embedBrandLogo(wb, sheet, logo, Math.max(sheet.columnCount || 6, 6));
+  }
+  await saveWorkbook(
+    wb,
+    buildDeskExportFilename({
+      screen: doc.screen,
+      productCode: result.productCode,
+      productName: result.productName,
+      extension: "xlsx",
+    }),
+  );
+}
+
+/** PDF for one Active Management tab, in the Unwinding Calculator chrome. */
+export async function downloadActiveManagementPdf(doc: AmExportDoc, result: UnwindResult) {
+  const pdf = await createScreenPdf(doc.orientation);
+  pdf.setDocumentProperties({
+    title: `${doc.title} · ${result.productCode}`,
+    subject: `${doc.title} as of ${formatDeskDate(result.unwindDate)}`,
+  });
+
+  await pdf.addLogo();
+  pdf.addBanner(doc.title, amSubtitle(doc, result));
+  pdf.addProductHero(
+    result.productName,
+    `${result.productCode}   ·   ${formatNumber(result.debentures, 0)} Debentures   ·   Spot ${formatNumber(result.spot, 2)}   ·   ${formatDeskDate(result.unwindDate)}`,
+  );
+  if (doc.inputs) {
+    pdf.addSection("Input Parameters");
+    pdf.addKeyValueTable(inputRows(result));
+  }
+  for (const section of doc.sections) {
+    pdf.addSection(section.title);
+    if (section.values) {
+      pdf.addKeyValueTable(section.values.map((value): [string, string] => [value.label, value.text]));
+    }
+    if (section.table) {
+      const cols = section.table.headers.length;
+      pdf.addDataTable(
+        section.table.headers,
+        section.table.text,
+        cols > 12 ? 5.4 : 6.8,
+        section.table.groupCol ?? 0,
+        section.table.mergeCols ?? [],
+      );
+    }
+  }
+  pdf.addDisclaimer();
+
+  pdf.save(
+    buildDeskExportFilename({
+      screen: doc.screen,
+      productCode: result.productCode,
+      productName: result.productName,
       extension: "pdf",
     }),
   );

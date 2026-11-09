@@ -13,6 +13,7 @@ import {
   optionBookRowsFlat,
 } from "../lib/workbook/build-screen-excel";
 import {
+  ACTIVE_MANAGEMENT_BOOK_HEADERS,
   OPTION_BOOK_HEADERS,
   PRODUCT_BOOK_HEADERS,
   PRODUCT_BOOK_SOURCE_MAP,
@@ -94,14 +95,22 @@ async function main() {
   const live = productsWithLiveMaturity(allProducts, asOf);
 
   console.log("\n=== Column contracts (desk ≡ download) ===");
-  assert("Product Book header count 33", PRODUCT_BOOK_HEADERS.length === 33, String(PRODUCT_BOOK_HEADERS.length));
+  // 33 Unwinding columns, then the 11 Active Management columns.
+  assert("Product Book header count 44", PRODUCT_BOOK_HEADERS.length === 44, String(PRODUCT_BOOK_HEADERS.length));
   assert(
     "Premium Outflow sits after Client Internal Rate of Return",
     PRODUCT_BOOK_HEADERS[PRODUCT_BOOK_HEADERS.indexOf("Client Internal Rate of Return") + 1] === "Premium Outflow",
   );
   assert(
-    "Option book columns close the Product Book",
-    PRODUCT_BOOK_HEADERS.slice(-OPTION_BOOK_HEADERS.length).join("|") === OPTION_BOOK_HEADERS.join("|"),
+    "Option book columns close the Unwinding columns",
+    PRODUCT_BOOK_HEADERS.slice(
+      -(ACTIVE_MANAGEMENT_BOOK_HEADERS.length + OPTION_BOOK_HEADERS.length),
+      -ACTIVE_MANAGEMENT_BOOK_HEADERS.length,
+    ).join("|") === OPTION_BOOK_HEADERS.join("|"),
+  );
+  assert(
+    "Active Management columns close the Product Book",
+    PRODUCT_BOOK_HEADERS.slice(-ACTIVE_MANAGEMENT_BOOK_HEADERS.length).join("|") === ACTIVE_MANAGEMENT_BOOK_HEADERS.join("|"),
   );
   assert("Options Book header count 11", OPTION_BOOK_HEADERS.length === 11);
   assert("Options Book has no Quantity Rounded column", !OPTION_BOOK_HEADERS.includes("Quantity Rounded" as never));
@@ -233,6 +242,72 @@ async function main() {
     assert("product book option price is a number", typeof priceCell?.value === "number", String(priceCell?.value));
     assert("product book expiry is a date", dateCell?.value instanceof Date, String(dateCell?.value));
     assert("product book IRR is a percent number", typeof rateCell?.value === "number" && String(rateCell?.numFmt) === "0.00%", String(rateCell?.numFmt));
+
+    // Active Management columns: a synthetic priced row, so the formats are checked without the quotes API.
+    const amQuote = {
+      ...quoteViewFromUnwind(numericResult, asOf),
+      am: {
+        actualTarget: 24000,
+        actualTargetSource: "Top Sell Put Strike" as const,
+        effectiveTarget: 24150.5,
+        observationsTotal: 4,
+        observationsPassed: 1,
+        observationsLeft: 3,
+        observationStartDate: "2026-03-30",
+        observationEndDate: "2027-09-29",
+        nextObservationDate: "2026-12-30",
+        averageSoFar: 23550.25,
+        observationStatus: "Observations Live" as const,
+        maxIrr: 0.12,
+        currentIrr: 0.1,
+        assumedLevel: 25000,
+        expectedQuoteRs: 101000,
+        expectedIrr: 0.11,
+        warnings: [],
+      },
+    };
+    const amScreen = buildProductBookMatrix({ serial: 1, product: numericProduct, asOf, quote: amQuote }).rows;
+    const amScreenCell = (header: (typeof ACTIVE_MANAGEMENT_BOOK_HEADERS)[number]) =>
+      amScreen[0]?.[PRODUCT_BOOK_HEADERS.indexOf(header)];
+    assert("screen current IRR is a percent", amScreenCell("Current Internal Rate of Return") === "10.00%", amScreenCell("Current Internal Rate of Return"));
+    assert("screen effective target is a level", amScreenCell("Effective Target") === "24,150.50", amScreenCell("Effective Target"));
+    assert("screen observation start is a desk date", amScreenCell("Observation Start Date") === "30-Mar-26", amScreenCell("Observation Start Date"));
+    assert(
+      "screen Active Management cells repeat on every leg row",
+      amScreen.every((row) => row.slice(-ACTIVE_MANAGEMENT_BOOK_HEADERS.length).join("|") === amScreen[0]!.slice(-ACTIVE_MANAGEMENT_BOOK_HEADERS.length).join("|")),
+    );
+    const amWb = await buildMultiProductBookWorkbook(
+      PRODUCT_BOOK_HEADERS,
+      buildProductBookExcelMatrix({ serial: 1, product: numericProduct, asOf, quote: amQuote }),
+    );
+    const amSheet = amWb.getWorksheet("Product Book");
+    let amHeader = 0;
+    amSheet?.eachRow((row, number) => {
+      if (String(row.getCell(1).value ?? "") === "Sr. No.") amHeader = number;
+    });
+    const amCell = (header: (typeof ACTIVE_MANAGEMENT_BOOK_HEADERS)[number], offset = 1) =>
+      amSheet?.getRow(amHeader + offset).getCell(PRODUCT_BOOK_HEADERS.indexOf(header) + 1);
+    for (const header of ["Current Internal Rate of Return", "Expected Internal Rate of Return at Assumed Level"] as const) {
+      assert(`${header} is a percent number`, typeof amCell(header)?.value === "number" && String(amCell(header)?.numFmt) === "0.00%", String(amCell(header)?.numFmt));
+    }
+    for (const header of ["Actual Target", "Effective Target", "Average So Far"] as const) {
+      assert(`${header} is a two-decimal number`, typeof amCell(header)?.value === "number" && String(amCell(header)?.numFmt) === "#,##0.00", String(amCell(header)?.numFmt));
+    }
+    for (const header of ["Observations Passed", "Observations Left"] as const) {
+      assert(`${header} is a whole number`, typeof amCell(header)?.value === "number" && String(amCell(header)?.numFmt) === "#,##0", String(amCell(header)?.numFmt));
+    }
+    for (const header of ["Observation Start Date", "Observation End Date", "Next Observation Date"] as const) {
+      assert(`${header} is a date`, amCell(header)?.value instanceof Date, String(amCell(header)?.value));
+    }
+    assert("Observation Status is text", amCell("Observation Status")?.value === "Observations Live", String(amCell("Observation Status")?.value));
+    if (numericResult.optionRows.length > 1) {
+      assert("Active Management cells merge across the product's legs", amCell("Observation Status", 2)?.isMerged === true);
+    }
+    const unpricedAm = buildProductBookExcelMatrix({ serial: 1, product: numericProduct, asOf, quote: quoteViewFromUnwind(numericResult, asOf) });
+    assert(
+      "quote without Active Management fields exports hyphens",
+      unpricedAm.every((row) => row.slice(-ACTIVE_MANAGEMENT_BOOK_HEADERS.length).every((cell) => cell === "-")),
+    );
   }
 
   const singleResult = unwindProduct(single, surface);

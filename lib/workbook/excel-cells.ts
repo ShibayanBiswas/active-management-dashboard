@@ -50,6 +50,8 @@ const PERCENT_HEADERS = new Set([
   "Bid Offer Spread",
   "Product Discounting Rate",
   "Premium Discounting Rate",
+  "Current Internal Rate of Return",
+  "Expected Internal Rate of Return at Assumed Level",
 ]);
 
 const INTEGER_HEADERS = new Set([
@@ -59,6 +61,8 @@ const INTEGER_HEADERS = new Set([
   "Residual Tenor",
   "Residual Tenure",
   "Number of Debentures",
+  "Observations Passed",
+  "Observations Left",
 ]);
 
 const DATE_HEADERS = new Set([

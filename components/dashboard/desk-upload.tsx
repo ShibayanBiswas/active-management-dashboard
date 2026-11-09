@@ -5,6 +5,7 @@ import { FileSpreadsheet, Upload } from "lucide-react";
 
 import { DeskDialog, type DeskDialogTone } from "@/components/ui/desk-dialog";
 import { useDataset } from "@/lib/context/dataset-provider";
+import { useWriteFetch } from "@/lib/context/desk-key-provider";
 import type { ProductMaster, VolSurface } from "@/lib/types";
 import {
   currentUploadMonthKey,
@@ -26,6 +27,7 @@ function currentMonthLabel(): string {
 
 export function useDeskUpload() {
   const { refresh, applyBook } = useDataset();
+  const writeFetch = useWriteFetch();
   const [busyKind, setBusyKind] = useState<DeskUploadKind | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const inFlight = useRef(false);
@@ -63,7 +65,8 @@ export function useDeskUpload() {
       if (kind === "vol-surface") form.append("monthKey", monthKey);
       const endpoint =
         kind === "vol-surface" ? "/api/uploads/vol-surface" : "/api/multi/uploads/product-master";
-      const res = await fetch(endpoint, { method: "POST", body: form });
+      const res = await writeFetch(endpoint, { method: "POST", body: form });
+      if (!res) return false;
       const raw = await res.text();
       let data: {
         error?: string;
@@ -106,11 +109,14 @@ export function useDeskUpload() {
           ? data.issues
           : [data.error || "The server did not accept this workbook."];
         const databaseIssue = issues.some((issue) => /write concern|desk database|mongo/i.test(issue));
+        // Refused by the Desk Key check before the workbook was read.
+        const guardRefusal = res.status === 413 || res.status === 429 || res.status === 503;
         setDialog({
           tone: "error",
-          title: "Upload Failed",
-          body:
-            res.status >= 500 || databaseIssue
+          title: guardRefusal && data.error ? data.error : "Upload Failed",
+          body: guardRefusal
+            ? "The workbook was not saved."
+            : res.status >= 500 || databaseIssue
               ? "The workbook was read, but the desk database could not save it. Try Save again after the next deploy."
               : kind === "vol-surface"
                 ? "This file does not match the Volatility Surface sample. Keep the same labels and sheet layout. You may add or remove expiry rows and strike-percent columns."

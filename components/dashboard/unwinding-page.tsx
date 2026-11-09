@@ -11,6 +11,10 @@ import {
   Table2,
 } from "lucide-react";
 
+import { ActiveManagementTab } from "@/components/active-management/active-management-tab";
+import type { UnwindBasis } from "@/components/active-management/am-table";
+import { ProductPricerTab } from "@/components/active-management/product-pricer-tab";
+import { ScenarioGridTab } from "@/components/active-management/scenario-grid-tab";
 import { UnwindInputPanel } from "@/components/dashboard/unwind-input-panel";
 import {
   AppPage,
@@ -43,7 +47,7 @@ import { unwindProductFactRows } from "@/lib/workbook/product-facts";
 import { preloadExcelExport } from "@/lib/workbook/excel-runtime";
 import { OPTION_BOOK_MERGE_COLS } from "@/lib/workbook/table-merge";
 
-type TabId = "quotes" | "facts" | "funding" | "rupees" | "options";
+type TabId = "quotes" | "facts" | "funding" | "rupees" | "options" | "active" | "pricer" | "scenario";
 
 function formatRs(v: number | null | undefined): string {
   return formatDeskRupees(v);
@@ -85,6 +89,8 @@ function toOptionDisplayRow(r: OptionTableRow): string[] {
 export function UnwindingPage() {
   const { inputs, product, surface, refresh } = useDataset();
   const [result, setResult] = useState<UnwindResult | null>(null);
+  /** What `result` was priced on, expiry closes included — the Active Management tabs reuse it. */
+  const [basis, setBasis] = useState<UnwindBasis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>("quotes");
   const [computing, setComputing] = useState(false);
@@ -133,6 +139,7 @@ export function UnwindingPage() {
   useEffect(() => {
     if (!product || !surface || pricingSpot == null || !inputs.debentures) {
       setResult(null);
+      setBasis(null);
       setComputing(false);
       return;
     }
@@ -164,22 +171,25 @@ export function UnwindingPage() {
             }
           }
         }
+        const pricedInputs = {
+          ...inputs,
+          spot: pricingSpot,
+          expirySpots,
+        };
         const next = computeUnwind({
           product,
           surface,
-          inputs: {
-            ...inputs,
-            spot: pricingSpot,
-            expirySpots,
-          },
+          inputs: pricedInputs,
         });
         if (!cancelled) {
           setResult(next);
+          setBasis({ product, surface, inputs: pricedInputs, result: next });
           setComputing(false);
         }
       } catch (e) {
         if (!cancelled) {
           setResult(null);
+          setBasis(null);
           setError(e instanceof Error ? e.message : "Unwind failed");
           setComputing(false);
         }
@@ -277,6 +287,9 @@ export function UnwindingPage() {
                       { id: "funding", label: "NBFC MIS" },
                       { id: "rupees", label: "NBFC Book Values" },
                       { id: "options", label: "Options Book" },
+                      { id: "active", label: "Active Management" },
+                      { id: "pricer", label: "Black Scholes Pricer" },
+                      { id: "scenario", label: "Scenario Grid" },
                     ]}
                     active={tab}
                     onSelect={(id) => setTab(id as TabId)}
@@ -454,6 +467,10 @@ export function UnwindingPage() {
                     </Panel>
                   </div>
                 ) : null}
+
+                {tab === "active" && basis ? <ActiveManagementTab basis={basis} /> : null}
+                {tab === "pricer" && basis ? <ProductPricerTab basis={basis} /> : null}
+                {tab === "scenario" && basis ? <ScenarioGridTab basis={basis} /> : null}
               </>
             )}
           </RevealOutput>

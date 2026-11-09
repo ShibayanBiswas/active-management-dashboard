@@ -1,3 +1,4 @@
+import type { ActiveManagementQuote } from "@/lib/active-management/book-row";
 import type { OptionLeg, OptionTableRow, ProductMaster, UnwindResult } from "@/lib/types";
 import type { ExcelCell } from "@/lib/workbook/excel-cells";
 import {
@@ -10,7 +11,7 @@ import {
   parseISODate,
   roundDeskMoney,
 } from "@/lib/utils";
-import { PRODUCT_BOOK_HEADERS } from "@/lib/workbook/export-columns";
+import { ACTIVE_MANAGEMENT_BOOK_HEADERS, PRODUCT_BOOK_HEADERS } from "@/lib/workbook/export-columns";
 import { productBookFactCells } from "@/lib/workbook/product-facts";
 
 const PRICE_BLANK_EPS = 0.005;
@@ -71,6 +72,9 @@ export type ProductBookQuoteView = {
   funding: ProductBookFunding | null;
   legs: ProductBookLegMark[];
 };
+
+/** A Product Book quote, with the Active Management fields once the desk has priced them. */
+type ProductBookRowQuote = ProductBookQuoteView & { am?: ActiveManagementQuote | null };
 
 function expiredCounted(row: OptionTableRow): boolean {
   return row.expired && Math.abs(row.unwindPrice) > 0;
@@ -179,6 +183,29 @@ function staticAmount(leg: OptionLeg, product: ProductMaster): number {
 }
 
 /**
+ * Active Management cells, in ACTIVE_MANAGEMENT_BOOK_HEADERS order. "…" while the quote is pending,
+ * "-" when it has no Active Management fields. expectedPending: priced at other assumed levels, re-quote running.
+ */
+function activeManagementCells(quote: ProductBookRowQuote | null, expectedPending = false): string[] {
+  if (quote == null) return ACTIVE_MANAGEMENT_BOOK_HEADERS.map(() => "…");
+  const am = quote.am;
+  if (!am) return ACTIVE_MANAGEMENT_BOOK_HEADERS.map(() => "-");
+  return [
+    formatPct(am.currentIrr),
+    expectedPending ? "…" : formatPct(am.expectedIrr),
+    formatNumber(am.actualTarget, 2),
+    formatNumber(am.effectiveTarget, 2),
+    formatNumber(am.observationsPassed, 0),
+    formatNumber(am.observationsLeft, 0),
+    formatDeskDate(am.observationStartDate),
+    formatDeskDate(am.observationEndDate),
+    formatDeskDate(am.nextObservationDate),
+    formatNumber(am.averageSoFar, 2),
+    am.observationStatus || "-",
+  ];
+}
+
+/**
  * One display row per live option leg.
  * Product facts repeat so the table can club them. Priced cells stay "…" until a quote arrives.
  */
@@ -186,7 +213,8 @@ export function buildProductBookMatrix(args: {
   serial: number;
   product: ProductMaster;
   asOf: string;
-  quote: ProductBookQuoteView | null;
+  quote: ProductBookRowQuote | null;
+  expectedPending?: boolean;
 }): { rows: string[][]; displayOnly: boolean[] } {
   const legs = liveLegsOf(args.product);
   const pending = args.quote == null;
@@ -203,6 +231,8 @@ export function buildProductBookMatrix(args: {
     pending ? "…" : formatPct(args.quote?.residualIRR ?? null),
     ...facts,
   ];
+
+  const activeManagement = activeManagementCells(args.quote, args.expectedPending);
 
   const source = legs.length ? legs : [null];
   const rows = source.map((leg, index) => {
@@ -228,6 +258,7 @@ export function buildProductBookMatrix(args: {
       amount == null ? "-" : formatDeskRupees(amount),
       mark ? formatNumber(mark.unwindOptionPrice, 2) : "…",
       mark ? formatDeskRupees(mark.premiumOutflowAmount) : "…",
+      ...activeManagement,
     ];
   });
   return {
@@ -245,12 +276,31 @@ function excelNumber(value: number | null | undefined): ExcelCell {
   return value == null || !Number.isFinite(value) ? "-" : value;
 }
 
+/** Active Management download cells, in ACTIVE_MANAGEMENT_BOOK_HEADERS order. */
+function activeManagementExcelCells(quote: ProductBookRowQuote | null): ExcelCell[] {
+  const am = quote?.am;
+  if (!am) return ACTIVE_MANAGEMENT_BOOK_HEADERS.map(() => "-");
+  return [
+    excelNumber(am.currentIrr),
+    excelNumber(am.expectedIrr),
+    excelNumber(am.actualTarget),
+    excelNumber(am.effectiveTarget),
+    excelNumber(am.observationsPassed),
+    excelNumber(am.observationsLeft),
+    excelDate(am.observationStartDate ?? ""),
+    excelDate(am.observationEndDate ?? ""),
+    excelDate(am.nextObservationDate ?? ""),
+    excelNumber(am.averageSoFar),
+    am.observationStatus || "-",
+  ];
+}
+
 /** Product Book download rows. Money, rates, dates, and prices are Excel numbers. */
 export function buildProductBookExcelMatrix(args: {
   serial: number;
   product: ProductMaster;
   asOf: string;
-  quote: ProductBookQuoteView | null;
+  quote: ProductBookRowQuote | null;
 }): ExcelCell[][] {
   const legs = liveLegsOf(args.product);
   const pending = args.quote == null;
@@ -285,6 +335,7 @@ export function buildProductBookExcelMatrix(args: {
     invested,
     residual,
   ];
+  const activeManagement = activeManagementExcelCells(args.quote);
   const source = legs.length ? legs : [null];
   return source.map((leg, index) => {
     const mark = args.quote?.legs[index];
@@ -303,6 +354,7 @@ export function buildProductBookExcelMatrix(args: {
       excelNumber(amount),
       mark ? excelNumber(mark.unwindOptionPrice) : "-",
       mark ? excelNumber(mark.premiumOutflowAmount) : "-",
+      ...activeManagement,
     ];
   });
 }

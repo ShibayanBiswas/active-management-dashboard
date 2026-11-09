@@ -111,6 +111,9 @@ async function maybeE2e(volBuf: ArrayBuffer, productBuf: ArrayBuffer) {
     return;
   }
 
+  // Uploads need the Desk Key the dev server was started with.
+  const deskKey = { "x-desk-key": process.env.DESK_WRITE_KEY ?? "" };
+
   async function post(kind: "vol-surface" | "product-master", fileName: string, body: Buffer, extra?: Record<string, string>) {
     const form = new FormData();
     form.append("file", new File([new Uint8Array(body)], fileName));
@@ -118,11 +121,16 @@ async function maybeE2e(volBuf: ArrayBuffer, productBuf: ArrayBuffer) {
       for (const [k, v] of Object.entries(extra)) form.append(k, v);
     }
     const route = kind === "vol-surface" ? "/api/uploads/vol-surface" : "/api/multi/uploads/product-master";
-    return fetch(`${base}${route}`, { method: "POST", body: form });
+    return fetch(`${base}${route}`, { method: "POST", body: form, headers: deskKey });
   }
 
   const volFile = Buffer.from(volBuf);
   const productFile = Buffer.from(productBuf);
+
+  const keyless = new FormData();
+  keyless.append("file", new File([new Uint8Array(volFile)], volSurfaceSampleFileName()));
+  const keylessRes = await fetch(`${base}/api/uploads/vol-surface`, { method: "POST", body: keyless });
+  assert("e2e upload without Desk Key refused", keylessRes.status === 401 || keylessRes.status === 503, String(keylessRes.status));
 
   const okVol = await post("vol-surface", volSurfaceSampleFileName(), volFile, { monthKey: "2026-08" });
   const okVolJson = await okVol.json();
@@ -146,7 +154,7 @@ async function maybeE2e(volBuf: ArrayBuffer, productBuf: ArrayBuffer) {
 
   const jsonBody = await fetch(`${base}/api/uploads/vol-surface`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...deskKey },
     body: "{}",
   });
   const jsonBodyText = await jsonBody.text();
@@ -171,6 +179,7 @@ async function maybeE2e(volBuf: ArrayBuffer, productBuf: ArrayBuffer) {
   const multiOkRes = await fetch(`${base}/api/multi/uploads/product-master`, {
     method: "POST",
     body: multiOkForm,
+    headers: deskKey,
   });
   const multiOkText = await multiOkRes.text();
   let multiOkJson: { productCount?: number; legCount?: number; error?: string } = {};
@@ -206,6 +215,7 @@ async function maybeE2e(volBuf: ArrayBuffer, productBuf: ArrayBuffer) {
   const multiRepeatedRes = await fetch(`${base}/api/multi/uploads/product-master`, {
     method: "POST",
     body: multiRepeatedForm,
+    headers: deskKey,
   });
   assert("e2e multi repeated-row upload 200", multiRepeatedRes.ok, String(multiRepeatedRes.status));
 
@@ -217,6 +227,7 @@ async function maybeE2e(volBuf: ArrayBuffer, productBuf: ArrayBuffer) {
   const singleOnMultiRes = await fetch(`${base}/api/multi/uploads/product-master`, {
     method: "POST",
     body: singleOnMultiForm,
+    headers: deskKey,
   });
   assert("e2e 961 rejected on multi desk", singleOnMultiRes.status === 400, String(singleOnMultiRes.status));
 

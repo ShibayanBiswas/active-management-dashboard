@@ -4,6 +4,22 @@ Newest first. Each entry lists what changed, why, and where. Historical notes ar
 they were written on that day (a later entry may restyle something an earlier entry
 introduced).
 
+## 2026-11-09 — Active Management layer on the twin
+
+- Product Book gains eleven columns (Current and Expected Internal Rate of Return, Actual and
+  Effective Target, Observations Passed and Left, Observation Start, End and Next Date,
+  Average So Far, Observation Status), the No Observation Passed and At Least One Observation
+  Passed tabs, and Assumed Nifty and Sensex Level inputs.
+- Unwinding Calculator gains the Active Management, Black Scholes Pricer and Scenario Grid
+  tabs, each with Excel and PDF.
+- `POST /api/multi/quotes` returns an `am` block per product and takes `assumed`.
+- Actual Target is baked from the New Primary master (`npm run bake:am-targets`).
+- `normalizeVolSurface` is memoised, which makes a whole-book pass about 80 times faster with
+  identical results.
+- `verify:am` is added to `npm run verify` and CI. Logic Atlas gains three modules and an
+  Active Management lane.
+- Details: [11](11-active-management.md).
+
 ## 2026-11-09 — Active Management Dashboard: twin of the Multiple Product Version
 
 - This repository now carries the Unwinding Calculator (commit `764b138`) Multiple Product

@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
 
 import { readMultipartWorkbook } from "@/lib/api/read-upload-file";
-import { persistActiveSurface } from "@/lib/data/load";
+import { guardWrite } from "@/lib/api/write-guard";
+import { persistActiveSurface, presentSurfaceForDeskMonth } from "@/lib/data/load";
 import { normalizeVolSurface } from "@/lib/engine/vol-surface";
 import { parseVolSurfaceWorkbook } from "@/lib/workbook/parsers";
-import { currentUploadMonthKey, validateDeskUpload } from "@/lib/workbook/upload-schema";
+import { currentUploadMonthKey, MAX_UPLOAD_BYTES, validateDeskUpload } from "@/lib/workbook/upload-schema";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
+  const blocked = guardWrite(req, MAX_UPLOAD_BYTES);
+  if (blocked) return blocked;
   const uploaded = await readMultipartWorkbook(req);
   if (!uploaded.ok) {
     return NextResponse.json({ error: uploaded.error, issues: uploaded.issues }, { status: 400 });
@@ -34,7 +37,8 @@ export async function POST(req: Request) {
   const saved = normalizeVolSurface(surface);
   try {
     const persisted = await persistActiveSurface(saved, uploaded.name);
-    return NextResponse.json({ ok: true, surface: saved, summary: check.summary, persisted });
+    // Shown with the month's reference prices, the closes on or before the 1st, as every later load shows it.
+    return NextResponse.json({ ok: true, surface: await presentSurfaceForDeskMonth(saved), summary: check.summary, persisted });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Desk database write failed";
     return NextResponse.json(

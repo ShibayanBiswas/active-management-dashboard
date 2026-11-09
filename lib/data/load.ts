@@ -248,19 +248,19 @@ async function monthAnchors(monthKey: string): Promise<{ nifty: number | null; s
 
 /**
  * Show the current month. Carry the previous vol grid when this month has no upload.
- * A surface without its own reference prices takes its month's Yahoo anchors, never the live spot.
+ * The reference prices are always the month's Yahoo closes on or before the 1st, uploaded or carried;
+ * the surface's own prices are kept only when Yahoo has none. Never the live spot.
  */
 export async function presentSurfaceForDeskMonth(surface: VolSurface): Promise<VolSurface> {
   const todayMonth = deskMonthKey();
   if (surface.monthKey >= todayMonth) {
     const hasNifty = Number(surface.referenceUnderlyingPrice) > 0;
     const hasSensex = Number(surface.referenceSensexPrice) > 0;
-    if (hasNifty && hasSensex) return surface;
     const anchors = await monthAnchors(surface.monthKey);
     return normalizeVolSurface({
       ...surface,
-      referenceUnderlyingPrice: hasNifty ? surface.referenceUnderlyingPrice : (anchors.nifty ?? undefined),
-      referenceSensexPrice: hasSensex ? surface.referenceSensexPrice : (anchors.sensex ?? undefined),
+      referenceUnderlyingPrice: anchors.nifty ?? (hasNifty ? surface.referenceUnderlyingPrice : undefined),
+      referenceSensexPrice: anchors.sensex ?? (hasSensex ? surface.referenceSensexPrice : undefined),
     });
   }
   return labelSurfaceForDeskMonth(surface, todayMonth, await monthAnchors(todayMonth));

@@ -8,6 +8,14 @@ is no Single Product Version. A fully dynamic Black–Scholes option book, NBFC 
 grown values, whole-book economics, and Product, Client and Residual internal rates of return
 as of any unwinding date.
 
+On top of that sits the **Active Management layer** ([docs/11](docs/11-active-management.md)):
+- Product Book columns for Current and Expected Internal Rate of Return, Actual and Effective
+  Target, and Observations Passed and Left with their start and end dates.
+- No Observation Passed and At Least One Observation Passed tabs.
+- Assumed Nifty and Sensex Levels.
+- Per-product Active Management, Black Scholes Pricer and ±1,000-point Scenario Grid tabs on the
+  Unwinding Calculator.
+
 Styling follows the Primary SP Dashboard (maroon `#7a1e2c`, gold `#d4b24c`, serif headings)
 with the Dynamic Probability Calculator card language.
 
@@ -21,9 +29,10 @@ with the Dynamic Probability Calculator card language.
 npm install
 cp .env.example .env.local    # optional: set MONGODB_URI; without it the desk runs on the seeds
 npm run dev                   # http://localhost:3006
-npm run verify                # typecheck + parity + edge + pricer + samples + upload + xlsm + exports + downloads + embed
+npm run verify                # typecheck + parity + edge + pricer + samples + upload + xlsm + exports + downloads + embed + am
 npm run verify:desk           # live pages + multi APIs (needs npm run dev on port 3006)
 npm run collate:multi         # FY21–FY27 multi book → multi-products-seed.json (+ Mongo when URI set)
+npm run bake:am-targets       # Actual Target seed from the New Primary master (../Secondary SP Dashboard)
 npm run build:samples         # clean sample input files (light headers, compact cells)
 npm run seed                  # optional — requires MONGODB_URI (October vol surface + multi book)
 ```
@@ -35,8 +44,8 @@ folder.
 
 | Route | Purpose |
 |-------|---------|
-| `/` | Home — live Product Book (quote, IRRs, Premium Outflow, facts, and one Options Book row per leg; observation-date Reveal; no expired products), Post Observation Analytics, Desk Snapshot, Desk Modules, Desk Book with **Expired** tab |
-| `/portfolio/unwinding` | Unwinding Calculator — product picker, five tabs plus branded Excel/PDF (dynamic columns, no cell padding) |
+| `/` | Home — live Product Book (quote, IRRs, Premium Outflow, facts, and one Options Book row per leg, then the eleven Active Management columns; observation-date Reveal; observation progress tabs; Assumed Levels; no expired products), Post Observation Analytics, Desk Snapshot, Desk Modules, Desk Book with **Expired** tab |
+| `/portfolio/unwinding` | Unwinding Calculator — product picker, five tabs plus Active Management, Black Scholes Pricer and Scenario Grid, each with branded Excel/PDF (dynamic columns, no cell padding) |
 | `/portfolio/pricer` | Pricer Table — 14 columns, no Option Code, merged repeats, branded Excel/PDF |
 | `/intelligence` | Logic Atlas — pipelines, primitives, desk module lanes |
 | `/upload` | Volatility Surface and Multiple Product Master uploads — open, schema-checked, popup result |
@@ -88,8 +97,12 @@ Engine golden checks (`npm run verify:parity`, `verify:pricer`) replay Nifty Acc
 
 ## Uploads
 
-Viewing and uploading are public. There is no login. Header shortcuts and `/upload` accept
-the sample Excel layout. Expiry rows and strike percents on the Volatility Surface may
+Viewing is public. There is no login. Every upload and every desk Save asks for the Desk
+Key (the Hedging Sheet's key, set on the server as `DESK_WRITE_KEY`); it is kept in memory
+until the page reloads. Without `DESK_WRITE_KEY` on the server nothing can be saved.
+Header shortcuts and `/upload` accept the sample Excel layout. The Reference Nifty and
+Sensex Prices shown are always the Yahoo closes on or before the 1st of the current month,
+whatever the uploaded file lists. Expiry rows and strike percents on the Volatility Surface may
 change; the Product Master keeps the same 28 column labels. A popup reports success or the
 format errors. A valid upload replaces Home and both calculators.
 

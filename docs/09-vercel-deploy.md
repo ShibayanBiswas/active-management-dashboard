@@ -16,6 +16,7 @@
 | `MONGODB_URI` | Atlas URI on `cluster0.lvoycia` (secret, never committed) |
 | `MONGODB_DB` | `active_management` |
 | `NEXT_PUBLIC_APP_URL` | `https://active-management-dashboard.vercel.app` |
+| `DESK_WRITE_KEY` | The Hedging Sheet's Desk Key, the same value as on the hedging-sheet and Unwinding projects (secret). Without it every upload and Save is refused with "Saving Is Turned Off" |
 
 Without `MONGODB_URI` the desk still runs on the seeds: `lib/data/multi-products-seed.json`
 (2,505 products) and `lib/data/vol-surface-seed.json`. Uploads then answer

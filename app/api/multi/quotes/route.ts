@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 
+import { activeManagementQuote, type ActiveManagementQuote } from "@/lib/active-management/book-row";
+import { expectedIrrAtLevel } from "@/lib/active-management/scenario";
+import { actualTargetFor } from "@/lib/active-management/target-seed";
 import { loadMultiDesk } from "@/lib/data/multi-load";
-import { computeUnwindWithExpirySpots } from "@/lib/engine/compute-unwind-with-spots";
+import {
+  computeUnwindWithExpirySpots,
+  type UnwindWithSpotsResult,
+} from "@/lib/engine/compute-unwind-with-spots";
 import { resolveDeskSpots } from "@/lib/engine/desk-spots";
 import { issuedCount, productKey } from "@/lib/multi/product-key";
-import type { ProductMaster, VolSurface } from "@/lib/types";
+import type { ProductMaster, UnwindInputs, VolSurface } from "@/lib/types";
 import { deskTodayISO, underlyingFromProductName } from "@/lib/utils";
 import { quoteViewFromUnwind, type ProductBookQuoteView } from "@/lib/workbook/product-book-rows";
 
@@ -17,37 +23,84 @@ function todayISO(): string {
   return deskTodayISO();
 }
 
+/** Expected IRR index levels. Null means the desk spot. */
+type AssumedLevels = { nifty: number | null; sensex: number | null };
+
+function assumedLevel(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/**
+ * Active Management fields off the unwind just priced: the same expiry closes for the
+ * observation fixings, and one more full unwind at the assumed level for Expected IRR.
+ * A failure here leaves am null and never blanks the quote beside it.
+ */
+function activeManagementFor(
+  key: string,
+  product: ProductMaster,
+  surface: VolSurface,
+  inputs: UnwindInputs,
+  result: UnwindWithSpotsResult,
+  assumed: AssumedLevels,
+): ActiveManagementQuote | null {
+  try {
+    const fixings = result.expirySpotsUsed ?? {};
+    const level = inputs.underlying === "Sensex" ? assumed.sensex : assumed.nifty;
+    const expected =
+      level == null
+        ? null
+        : expectedIrrAtLevel({ product, surface, inputs: { ...inputs, expirySpots: fixings }, level });
+    return activeManagementQuote({
+      product,
+      asOf: inputs.unwindDate,
+      result,
+      fixings,
+      target: actualTargetFor(product),
+      expected,
+    });
+  } catch (err) {
+    console.error("[multi quotes] active management", key, err);
+    return null;
+  }
+}
+
 async function quoteProducts(
   products: ProductMaster[],
   surface: VolSurface,
   nifty: number,
   sensex: number,
   unwindDate: string,
+  assumed: AssumedLevels,
 ) {
-  const quotes: Record<string, ProductBookQuoteView & { quotePct: number | null }> = {};
+  const quotes: Record<
+    string,
+    ProductBookQuoteView & { quotePct: number | null; am: ActiveManagementQuote | null }
+  > = {};
   for (const product of products) {
     const key = productKey(product);
     const underlying = underlyingFromProductName(product.productName, product.productCode);
     const spot = underlying === "Sensex" ? sensex : nifty;
     try {
+      const inputs: UnwindInputs = {
+        debentures: issuedCount(product),
+        unwindDate,
+        spot,
+        underlying,
+        nifty,
+        sensex,
+        bidAskSpread: 0,
+      };
       const result = await computeUnwindWithExpirySpots({
         product,
         surface,
         yahooDeskSpots: false,
-        inputs: {
-          debentures: issuedCount(product),
-          unwindDate,
-          spot,
-          underlying,
-          nifty,
-          sensex,
-          bidAskSpread: 0,
-        },
+        inputs,
       });
       const view = quoteViewFromUnwind(result, unwindDate);
       quotes[key] = {
         ...view,
         quotePct: result.unwindQuotePct,
+        am: activeManagementFor(key, product, surface, inputs, result, assumed),
       };
     } catch (err) {
       console.error("[multi quotes]", key, err);
@@ -62,6 +115,7 @@ async function quoteProducts(
         economics: null,
         funding: null,
         legs: [],
+        am: null,
       };
     }
   }
@@ -82,6 +136,8 @@ export async function POST(req: Request) {
     keys?: string[];
     /** Optional client book slice — prices uploads before / without Mongo sync. */
     products?: ProductMaster[];
+    /** Optional Expected IRR levels; anything but a finite positive number means the desk spot. */
+    assumed?: { nifty?: number | null; sensex?: number | null };
   } | null;
   const keys = [...new Set((body?.keys ?? []).filter((key) => typeof key === "string" && key.length > 0))];
   if (!keys.length) {
@@ -100,6 +156,10 @@ export async function POST(req: Request) {
   const clientProducts = Array.isArray(body?.products)
     ? body!.products!.filter((p): p is ProductMaster => Boolean(p && typeof p === "object"))
     : [];
+  const assumed: AssumedLevels = {
+    nifty: assumedLevel(body?.assumed?.nifty),
+    sensex: assumedLevel(body?.assumed?.sensex),
+  };
   const unwindDate = todayISO();
   let loaded: [Awaited<ReturnType<typeof loadMultiDesk>>, Awaited<ReturnType<typeof resolveDeskSpots>>];
   try {
@@ -120,7 +180,7 @@ export async function POST(req: Request) {
 
   return NextResponse.json(
     {
-      quotes: await quoteProducts(slice, surface, desk.nifty, desk.sensex, unwindDate),
+      quotes: await quoteProducts(slice, surface, desk.nifty, desk.sensex, unwindDate, assumed),
       unwindDate,
       nifty: desk.nifty,
       sensex: desk.sensex,

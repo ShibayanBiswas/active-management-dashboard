@@ -13,20 +13,36 @@ import {
 } from "react";
 
 import { DatasetContext, type DatasetContextValue } from "@/lib/context/dataset-provider";
+import { DESK_KEY_CANCELLED, useWriteFetch } from "@/lib/context/desk-key-provider";
 import { normalizeVolSurface } from "@/lib/engine/vol-surface";
 import { issuedCount, productKey, uniqueProductsByIsin } from "@/lib/multi/product-key";
 import { productHasLiveMaturity, productsWithLiveMaturity } from "@/lib/observation-tabs";
 import type { ProductMaster, UnwindInputs, VolSurface } from "@/lib/types";
 import { deskTodayISO, underlyingFromProductName } from "@/lib/utils";
 import type { ProductBookQuoteView } from "@/lib/workbook/product-book-rows";
+import type { ActiveManagementQuote } from "@/lib/active-management/book-row";
 
 const SELECTED_KEY = "uc-multi-selected-product";
 
+/** Index levels for Expected IRR. Null means the desk spot the quotes were priced at. */
+export type AssumedLevels = { nifty: number | null; sensex: number | null };
+
+export function sameAssumedLevels(a: AssumedLevels, b: AssumedLevels): boolean {
+  return a.nifty === b.nifty && a.sensex === b.sensex;
+}
+
 export type MultiQuote = ProductBookQuoteView & {
   quotePct: number | null;
+  /** Null while pending or when the unwind failed. */
+  am: ActiveManagementQuote | null;
+  /**
+   * The assumedLevels sent with the batch that priced this quote (client stamp, not from the route).
+   * Expected IRR is stale while it differs from the current assumedLevels.
+   */
+  pricedAt: AssumedLevels;
 };
 
-function blankQuote(asOf: string): MultiQuote {
+function blankQuote(asOf: string, pricedAt: AssumedLevels): MultiQuote {
   return {
     quoteRs: null,
     quotePct: null,
@@ -38,6 +54,8 @@ function blankQuote(asOf: string): MultiQuote {
     economics: null,
     funding: null,
     legs: [],
+    am: null,
+    pricedAt,
   };
 }
 
@@ -58,6 +76,10 @@ export type MultiQuotesContextValue = {
   quotesLoaded: number;
   /** Live-maturity products targeted for the current quote pass. */
   quotesTotal: number;
+  assumedLevels: AssumedLevels;
+  setAssumedLevels: (next: AssumedLevels) => void;
+  /** Desk spots the current quote pass priced at. */
+  deskLevels: AssumedLevels;
 };
 
 const MultiDeskContext = createContext<MultiDeskContextValue | null>(null);
@@ -115,6 +137,7 @@ function persistSelectedKey(key: string) {
 }
 
 export function MultiDatasetProvider({ children }: { children: ReactNode }) {
+  const writeFetch = useWriteFetch();
   const [liveBook, setLiveBook] = useState<ProductMaster[]>([]);
   /** Matured products only — loaded in background for Desk Book Expired; never merges into live list. */
   const [maturedExtras, setMaturedExtras] = useState<ProductMaster[]>([]);
@@ -125,6 +148,8 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
   const [quotesLoading, setQuotesLoading] = useState(false);
   const [quotesLoaded, setQuotesLoaded] = useState(0);
   const [quotesTotal, setQuotesTotal] = useState(0);
+  const [assumedLevels, setAssumedLevels] = useState<AssumedLevels>({ nifty: null, sensex: null });
+  const [deskLevels, setDeskLevels] = useState<AssumedLevels>({ nifty: null, sensex: null });
   const [asOfToday, setAsOfToday] = useState(todayISO);
   const [inputs, setInputsState] = useState<UnwindInputs>(defaultInputs);
   /** Drop late /api/multi/dataset responses so a slow first load cannot overwrite a fresh upload. */
@@ -147,7 +172,10 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
     [products, selectedKey],
   );
 
-  /** Stable signature so merging the full book for Expired does not restart quote pricing. */
+  /**
+   * Stable signature so merging the full book for Expired does not restart quote pricing.
+   * A new assumed level re-runs the pass; the quotes on screen stay until the new ones merge in.
+   */
   const quoteRunKey = useMemo(() => {
     if (!surface || !products.length) return "";
     const mid = products[Math.floor(products.length / 2)];
@@ -158,13 +186,17 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
       productKey(products[0]!),
       mid ? productKey(mid) : "",
       productKey(products[products.length - 1]!),
+      String(assumedLevels.nifty ?? ""),
+      String(assumedLevels.sensex ?? ""),
     ].join("|");
-  }, [asOfToday, products, surface]);
+  }, [asOfToday, products, surface, assumedLevels]);
 
   const productsRef = useRef(products);
   productsRef.current = products;
   const surfaceRef = useRef(surface);
   surfaceRef.current = surface;
+  const assumedRef = useRef(assumedLevels);
+  assumedRef.current = assumedLevels;
 
   const applySelected = useCallback((next: ProductMaster, prevCode?: string) => {
     const issued = issuedCount(next);
@@ -295,6 +327,7 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
     if (!quoteRunKey) return;
     const book = productsRef.current;
     const surf = surfaceRef.current;
+    const assumed = assumedRef.current;
     if (!book.length || !surf) return;
     let cancelled = false;
     setQuotesLoading(true);
@@ -346,7 +379,7 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
               res = await fetch("/api/multi/quotes", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ keys }),
+                body: JSON.stringify({ keys, assumed }),
                 cache: "no-store",
               }).catch(() => null);
               if (res?.ok) break;
@@ -354,29 +387,32 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
             if (cancelled) return;
             if (res?.ok) {
               const data = (await res.json()) as {
-                quotes?: Record<string, MultiQuote>;
+                quotes?: Record<string, Omit<MultiQuote, "pricedAt">>;
                 nifty?: number | null;
                 sensex?: number | null;
               };
-              if (data.quotes) Object.assign(next, data.quotes);
+              for (const [key, quote] of Object.entries(data.quotes ?? {})) {
+                next[key] = { ...quote, pricedAt: assumed };
+              }
               if (typeof data.nifty === "number") nifty = data.nifty;
               if (typeof data.sensex === "number") sensex = data.sensex;
             } else {
               // Do not price hundreds of products on the UI thread — leave blanks.
               for (const item of slice) {
                 const key = productKey(item);
-                if (!(key in next)) next[key] = blankQuote(asOf);
+                if (!(key in next)) next[key] = blankQuote(asOf, assumed);
               }
             }
           } catch {
             for (const item of slice) {
               const key = productKey(item);
-              if (!(key in next)) next[key] = blankQuote(asOf);
+              if (!(key in next)) next[key] = blankQuote(asOf, assumed);
             }
           }
 
           if (!spotsApplied && (nifty != null || sensex != null)) {
             spotsApplied = true;
+            setDeskLevels({ nifty, sensex });
             setInputsState((prev) => ({
               ...prev,
               nifty,
@@ -462,12 +498,13 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
     if (!payload.expiries.length) {
       throw new Error("Add at least one expiry date before saving.");
     }
-    const res = await fetch("/api/surface", {
+    const res = await writeFetch("/api/surface", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
       cache: "no-store",
     });
+    if (!res) throw new Error(DESK_KEY_CANCELLED);
     const data = await readApiPayload(res);
     if (!res.ok) {
       throw new Error(apiErrorMessage(data, "The Volatility Surface could not be saved."));
@@ -476,16 +513,17 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
     const persisted = data.persisted === true;
     setSurface(saved);
     return { persisted };
-  }, []);
+  }, [writeFetch]);
 
   const saveProduct = useCallback(
     async (next: ProductMaster): Promise<{ persisted: boolean }> => {
-      const res = await fetch("/api/multi/product", {
+      const res = await writeFetch("/api/multi/product", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(next),
         cache: "no-store",
       });
+      if (!res) throw new Error(DESK_KEY_CANCELLED);
       const data = await readApiPayload(res);
       if (!res.ok) {
         throw new Error(apiErrorMessage(data, "The Product Master could not be saved."));
@@ -503,7 +541,7 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
       }
       return { persisted };
     },
-    [applySelected],
+    [applySelected, writeFetch],
   );
 
   const deskValue = useMemo<MultiDeskContextValue>(
@@ -523,8 +561,11 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
       quotesLoading,
       quotesLoaded,
       quotesTotal,
+      assumedLevels,
+      setAssumedLevels,
+      deskLevels,
     }),
-    [quotes, quotesLoading, quotesLoaded, quotesTotal],
+    [quotes, quotesLoading, quotesLoaded, quotesTotal, assumedLevels, deskLevels],
   );
 
   const datasetValue = useMemo<DatasetContextValue>(

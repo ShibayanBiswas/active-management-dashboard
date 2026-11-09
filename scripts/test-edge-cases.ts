@@ -32,7 +32,12 @@ import multiSeed from "../lib/data/multi-products-seed.json";
 import volSeed from "../lib/data/vol-surface-seed.json";
 import goldenSepSurface from "../lib/data/vol-surface-golden-sep-2026.json";
 import { parseISODate, underlyingFromProductName, computeGroupedRowSpans, computeRowSpans, deskTodayISO, formatNumber, roundDeskMoney } from "../lib/utils";
-import { OPTION_BOOK_HEADERS, POST_OBSERVATION_HEADERS, PRODUCT_BOOK_HEADERS } from "../lib/workbook/export-columns";
+import {
+  ACTIVE_MANAGEMENT_BOOK_HEADERS,
+  OPTION_BOOK_HEADERS,
+  POST_OBSERVATION_HEADERS,
+  PRODUCT_BOOK_HEADERS,
+} from "../lib/workbook/export-columns";
 import { allOptionExpiriesPassed, amountWithNbfcRupees, postObservationDisplayRow, postObservationFigures } from "../lib/multi/post-observation";
 import { premiumOutflowInWindow } from "../lib/workbook/product-book-rows";
 import { buildProductBookMatrix, clubProductBookDisplay } from "../lib/workbook/product-book-rows";
@@ -681,8 +686,19 @@ check("Nifty code without Sensex stays Nifty", underlyingFromProductName("Dual B
     PRODUCT_BOOK_HEADERS[7] === "Premium Outflow",
   );
   check(
-    "Options Book columns close the Product Book",
-    PRODUCT_BOOK_HEADERS.slice(-OPTION_BOOK_HEADERS.length).join("|") === OPTION_BOOK_HEADERS.join("|"),
+    "Options Book columns close the Unwinding columns",
+    PRODUCT_BOOK_HEADERS.slice(
+      -(ACTIVE_MANAGEMENT_BOOK_HEADERS.length + OPTION_BOOK_HEADERS.length),
+      -ACTIVE_MANAGEMENT_BOOK_HEADERS.length,
+    ).join("|") === OPTION_BOOK_HEADERS.join("|"),
+  );
+  check(
+    "Active Management columns close the Product Book",
+    PRODUCT_BOOK_HEADERS.slice(-ACTIVE_MANAGEMENT_BOOK_HEADERS.length).join("|") === ACTIVE_MANAGEMENT_BOOK_HEADERS.join("|"),
+  );
+  check(
+    "a pending quote shows the Active Management cells as pending",
+    matrix.rows.every((row) => row.slice(-ACTIVE_MANAGEMENT_BOOK_HEADERS.length).every((cell) => cell === "…")),
   );
   const live = productsWithLiveMaturity(multiSeed as ProductMaster[], "2026-10-03");
   const oldestObs = oldestObservationYmd(live, "2026-10-03");
@@ -753,6 +769,12 @@ check("Nifty code without Sensex stays Nifty", underlyingFromProductName("Dual B
   check(
     "Unwind Option Price stays one cell per leg",
     spans.every((row) => row[PRODUCT_BOOK_HEADERS.indexOf("Unwind Option Price")] === 1),
+  );
+  check(
+    "Active Management columns club across the product's legs",
+    ACTIVE_MANAGEMENT_BOOK_HEADERS.every(
+      (header) => (spans[0]?.[PRODUCT_BOOK_HEADERS.indexOf(header)] ?? 0) === matrix.rows.length,
+    ),
   );
 }
 

@@ -2,11 +2,18 @@
 
 import { memo, startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { LayoutGroup } from "framer-motion";
 import { Download, Search } from "lucide-react";
 
 import { GhostButton, PrimaryButton, SubPageTabs } from "@/components/layout/app-ui";
 import { QuoteLoadProgress } from "@/components/ui/quote-load-progress";
-import { useMultiDesk, useMultiQuotes, type MultiQuote } from "@/lib/context/multi-desk-provider";
+import {
+  OBSERVATION_PROGRESS_TABS,
+  productHasProgressTab,
+  type ObservationProgressTab,
+} from "@/lib/active-management/observations";
+import { sameAssumedLevels, useMultiDesk, useMultiQuotes, type MultiQuote } from "@/lib/context/multi-desk-provider";
+import { INDEX_STRIKE_PRICE_DECIMALS } from "@/lib/engine/vol-surface";
 import {
   OBSERVATION_DATE_MODE_LABELS,
   OBSERVATION_DATE_MODES,
@@ -19,7 +26,7 @@ import { productKey } from "@/lib/multi/product-key";
 import { LIVE_OBSERVATION_TAB_ORDER, productHasObservationTab, type ObservationTabId } from "@/lib/observation-tabs";
 import type { ProductMaster } from "@/lib/types";
 import { useVirtualWindow } from "@/lib/ui/use-virtual-window";
-import { cn, computeGroupedRowSpans, deskTodayISO, formatDeskRupees } from "@/lib/utils";
+import { cn, computeGroupedRowSpans, deskTodayISO, formatDeskDate, formatDeskRupees, formatNumber } from "@/lib/utils";
 import { PRODUCT_BOOK_HEADERS } from "@/lib/workbook/export-columns";
 import { buildProductBookExcelMatrix, buildProductBookMatrix, liveLegsOf, premiumOutflowInWindow } from "@/lib/workbook/product-book-rows";
 import { preloadExcelExport } from "@/lib/workbook/excel-runtime";
@@ -27,12 +34,16 @@ import { preloadExcelExport } from "@/lib/workbook/excel-runtime";
 const ROW_HEIGHT = 45;
 const HEADERS = PRODUCT_BOOK_HEADERS;
 
+const EXPECTED_IRR_HEADER: (typeof HEADERS)[number] = "Expected Internal Rate of Return at Assumed Level";
+
 const CALC_COLS = new Set([
   "Unwind Quote Amount",
   "Product Internal Rate of Return",
   "Client Internal Rate of Return",
   "Premium Outflow",
   "Residual Internal Rate of Return",
+  "Current Internal Rate of Return",
+  EXPECTED_IRR_HEADER,
 ]);
 
 const FACT_COLS = new Set([
@@ -51,9 +62,22 @@ const FACT_COLS = new Set([
   "Strike Price",
   "Number of Spreads",
   "Unwind Quantity",
+  "Actual Target",
+  "Effective Target",
+  "Observations Passed",
+  "Observations Left",
+  "Average So Far",
 ]);
 
 const OUTFLOW_COLS = new Set(["Unwind Option Price", "Premium Outflow Amount"]);
+
+type ProgressTabId = "all" | ObservationProgressTab;
+
+/** Second tab strip. Filters inside the active observation tab, search and revealed date window. */
+const PROGRESS_TAB_ORDER: ReadonlyArray<{ id: ProgressTabId; label: string }> = [
+  { id: "all", label: "All Products" },
+  ...OBSERVATION_PROGRESS_TABS,
+];
 
 type FlatLeg = {
   key: string;
@@ -68,6 +92,10 @@ function matchesQuery(product: ProductMaster, needle: string): boolean {
     .map((value) => String(value ?? "").trim())
     .filter((value) => value.length > 0 && value !== "-")
     .some((value) => value.toLowerCase().includes(needle));
+}
+
+function inProgressTab(product: ProductMaster, tab: ProgressTabId, somePassed: ReadonlySet<ProductMaster>): boolean {
+  return tab === "all" || somePassed.has(product) === (tab === "some-passed");
 }
 
 function clampDate(value: string, min: string, max: string): string {
@@ -128,12 +156,14 @@ const ProductBookRow = memo(function ProductBookRow({
 export function MultiProductTable() {
   const router = useRouter();
   const { products, selectProduct, asOfToday } = useMultiDesk();
-  const { quotes, quotesLoading, quotesLoaded, quotesTotal } = useMultiQuotes();
+  const { quotes, quotesLoading, quotesLoaded, quotesTotal, assumedLevels, deskLevels } = useMultiQuotes();
   const deferredQuotes = useDeferredValue(quotes);
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [observationTab, setObservationTab] = useState<ObservationTabId>("ongoing");
   const deferredObservationTab = useDeferredValue(observationTab);
+  const [progressTab, setProgressTab] = useState<ProgressTabId>("all");
+  const deferredProgressTab = useDeferredValue(progressTab);
   const [observationMode, setObservationMode] = useState<ObservationDateMode>("any");
   const [rangeStart, setRangeStart] = useState("");
   const [rangeEnd, setRangeEnd] = useState("");
@@ -182,12 +212,37 @@ export function MultiProductTable() {
     );
   }, [tabProducts, appliedObservationFilter]);
 
+  // Progress membership needs dates only. Work it out once per book / as-of, then filter by lookup.
+  const somePassed = useMemo(() => {
+    const set = new Set<ProductMaster>();
+    for (const product of products) {
+      if (productHasProgressTab(product, "some-passed", asOf)) set.add(product);
+    }
+    return set;
+  }, [products, asOf]);
+
+  const progressCounts = useMemo((): Record<ProgressTabId, number> => {
+    let some = 0;
+    for (const product of filtered) if (somePassed.has(product)) some += 1;
+    return { all: filtered.length, "none-passed": filtered.length - some, "some-passed": some };
+  }, [filtered, somePassed]);
+
+  const shown = useMemo(
+    () =>
+      deferredProgressTab === "all"
+        ? filtered
+        : filtered.filter((product) => inProgressTab(product, deferredProgressTab, somePassed)),
+    [filtered, somePassed, deferredProgressTab],
+  );
+
   const windowProducts = useMemo(
     () =>
-      tabProducts.filter((product) =>
-        productMatchesObservationRange(product, observationMode, effectiveRangeStart, effectiveRangeEnd),
+      tabProducts.filter(
+        (product) =>
+          inProgressTab(product, deferredProgressTab, somePassed) &&
+          productMatchesObservationRange(product, observationMode, effectiveRangeStart, effectiveRangeEnd),
       ),
-    [tabProducts, observationMode, effectiveRangeStart, effectiveRangeEnd],
+    [tabProducts, deferredProgressTab, somePassed, observationMode, effectiveRangeStart, effectiveRangeEnd],
   );
   const windowOutflow = useMemo(
     () =>
@@ -202,7 +257,7 @@ export function MultiProductTable() {
 
   const flat = useMemo(() => {
     const rows: FlatLeg[] = [];
-    for (const product of filtered) {
+    for (const product of shown) {
       const key = productKey(product);
       const serial = String(serialByKey.get(key) ?? "-");
       const legs = liveLegsOf(product);
@@ -212,7 +267,7 @@ export function MultiProductTable() {
       }
     }
     return rows;
-  }, [filtered, serialByKey]);
+  }, [shown, serialByKey]);
 
   const { onScroll, start, end } = useVirtualWindow(flat.length, ROW_HEIGHT, scrollerRef, 12);
   const bounds = useMemo(() => {
@@ -238,6 +293,7 @@ export function MultiProductTable() {
         product: head.product,
         asOf,
         quote,
+        expectedPending: quote != null && !sameAssumedLevels(quote.pricedAt, assumedLevels),
       });
       for (let i = 0; i < span; i += 1) {
         const legIndex = slice[cursor + i]!.legIndex;
@@ -255,23 +311,30 @@ export function MultiProductTable() {
         0,
       ),
     };
-  }, [flat, bounds.start, bounds.end, deferredQuotes, asOf]);
+  }, [flat, bounds.start, bounds.end, deferredQuotes, asOf, assumedLevels]);
 
+  // A re-quote for new assumed levels keeps the old quotes on screen; export only once all are re-priced.
   function quotesReady(list: ProductMaster[]) {
-    return list.length > 0 && list.every((product) => quotes[productKey(product)] != null);
+    return (
+      list.length > 0 &&
+      list.every((product) => {
+        const quote = quotes[productKey(product)];
+        return quote != null && sameAssumedLevels(quote.pricedAt, assumedLevels);
+      })
+    );
   }
 
-  const viewReady = quotesReady(filtered);
+  const viewReady = quotesReady(shown);
   const workbookReady = quotesReady(products);
 
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
     el.scrollTop = 0;
-  }, [deferredObservationTab, deferredQuery, appliedObservationFilter]);
+  }, [deferredObservationTab, deferredProgressTab, deferredQuery, appliedObservationFilter]);
 
   async function downloadExcel(kind: "view" | "workbook") {
-    const list = kind === "view" ? filtered : products;
+    const list = kind === "view" ? shown : products;
     const ready = kind === "view" ? viewReady : workbookReady;
     if (exporting || !ready) return;
     setExporting(kind);
@@ -280,9 +343,18 @@ export function MultiProductTable() {
       preloadExcelExport();
       const { downloadMultiProductBookExcel } = await import("@/lib/workbook/export-screen");
       const tab = LIVE_OBSERVATION_TAB_ORDER.find((item) => item.id === observationTab)?.label ?? "Ongoing";
+      const progress =
+        deferredProgressTab === "all"
+          ? ""
+          : (PROGRESS_TAB_ORDER.find((item) => item.id === deferredProgressTab)?.label ?? "");
       const revealed = appliedObservationFilter
-        ? `${OBSERVATION_DATE_MODE_LABELS[appliedObservationFilter.mode]} ${appliedObservationFilter.start} to ${appliedObservationFilter.end}`
+        ? `${OBSERVATION_DATE_MODE_LABELS[appliedObservationFilter.mode]} ${formatDeskDate(appliedObservationFilter.start)} to ${formatDeskDate(appliedObservationFilter.end)}`
         : "";
+      // Expected Internal Rate of Return is priced at these levels; a blank assumed level is the desk level.
+      const levels = [
+        `Assumed Nifty Level ${formatNumber(assumedLevels.nifty ?? deskLevels.nifty, INDEX_STRIKE_PRICE_DECIMALS)}`,
+        `Assumed Sensex Level ${formatNumber(assumedLevels.sensex ?? deskLevels.sensex, INDEX_STRIKE_PRICE_DECIMALS)}`,
+      ].join(" · ");
       const excelRows = list.flatMap((product) => {
         const key = productKey(product);
         return buildProductBookExcelMatrix({
@@ -293,8 +365,11 @@ export function MultiProductTable() {
         });
       });
       await downloadMultiProductBookExcel([...HEADERS], excelRows, {
-        productName: kind === "workbook" ? "All-Ongoing" : `View-${tab}`,
-        viewNote: kind === "workbook" ? "Export Workbook" : ["Export View", tab, revealed].filter(Boolean).join(" · "),
+        productName: kind === "workbook" ? "All-Ongoing" : ["View", tab, progress].filter(Boolean).join("-"),
+        viewNote:
+          kind === "workbook"
+            ? ["Export Workbook", levels].join(" · ")
+            : ["Export View", tab, progress, revealed, levels].filter(Boolean).join(" · "),
       });
     } catch (err) {
       setExportError(err instanceof Error ? err.message : "Excel download failed. Try again.");
@@ -424,6 +499,12 @@ export function MultiProductTable() {
           Reveal
         </PrimaryButton>
       </div>
+      <p className="-mt-2 mb-4 text-xs text-muted" aria-live="polite">
+        {appliedObservationFilter
+          ? `Showing products whose ${OBSERVATION_DATE_MODE_LABELS[appliedObservationFilter.mode]} falls between ${formatDeskDate(appliedObservationFilter.start)} and ${formatDeskDate(appliedObservationFilter.end)}.`
+          : `Reveal shows products whose ${OBSERVATION_DATE_MODE_LABELS[observationMode]} falls between the Start Date and End Date.`}{" "}
+        Each product&apos;s own dates are in the Observation Start Date and Observation End Date columns.
+      </p>
 
       <QuoteLoadProgress
         active={quotesLoading && quotesTotal > 0}
@@ -444,8 +525,23 @@ export function MultiProductTable() {
           }}
         />
       </div>
+      <div className="mb-3">
+        {/* Own layout group so this strip's active highlight never animates across from the strip above. */}
+        <LayoutGroup id="observation-progress">
+          <SubPageTabs
+            tabs={PROGRESS_TAB_ORDER.map((tab) => ({
+              id: tab.id,
+              label: `${tab.label} · ${progressCounts[tab.id].toLocaleString("en-IN")}`,
+            }))}
+            active={progressTab}
+            onSelect={(id) => {
+              startTransition(() => setProgressTab(id as ProgressTabId));
+            }}
+          />
+        </LayoutGroup>
+      </div>
       <p className="mb-3 text-xs text-muted">
-        {filtered.length} of {products.length} products. Click a row to open it.
+        {shown.length} of {products.length} products. Click a row to open it.
       </p>
       <div ref={scrollerRef} className="desk-table-scroll desk-table-scroll--book" onScroll={onScroll}>
         <table className="data-table-premium data-table-fill text-sm">
@@ -454,6 +550,11 @@ export function MultiProductTable() {
               {HEADERS.map((header, index) => (
                 <th
                   key={header}
+                  title={
+                    header === EXPECTED_IRR_HEADER
+                      ? "Client Internal Rate of Return at the Assumed Nifty Level or Assumed Sensex Level, capped at Product Internal Rate of Return."
+                      : undefined
+                  }
                   className={
                     index === 0
                       ? "col-pinned col-serial whitespace-nowrap px-3 py-2 text-left"
@@ -468,14 +569,16 @@ export function MultiProductTable() {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {shown.length === 0 ? (
               <tr>
                 <td className="px-3 py-10 text-center text-muted" colSpan={HEADERS.length}>
                   {products.length === 0
                     ? "Upload the Multiple Products master to load the desk."
-                    : appliedObservationFilter
-                      ? "No products have an observation in this date window."
-                      : "No products match this search."}
+                    : filtered.length > 0
+                      ? "No products in this tab."
+                      : appliedObservationFilter
+                        ? "No products have an observation in this date window."
+                        : "No products match this search."}
                 </td>
               </tr>
             ) : (

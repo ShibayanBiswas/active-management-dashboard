@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 
 import { EmbedNavigation } from "@/components/layout/embed-navigation";
+import { DeskKeyProvider } from "@/lib/context/desk-key-provider";
 import { MultiDatasetProvider } from "@/lib/context/multi-desk-provider";
 import { ThemeProvider } from "@/lib/context/theme-provider";
 
@@ -32,10 +33,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="bg-background font-serif text-ink antialiased">
         <ThemeProvider>
-          <MultiDatasetProvider>
-            <EmbedNavigation />
-            {children}
-          </MultiDatasetProvider>
+          <DeskKeyProvider>
+            <MultiDatasetProvider>
+              <EmbedNavigation />
+              {children}
+            </MultiDatasetProvider>
+          </DeskKeyProvider>
         </ThemeProvider>
       </body>
     </html>

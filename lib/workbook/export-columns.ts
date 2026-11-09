@@ -1,6 +1,22 @@
 /**
  * Shared screen-export column contracts — keep UI tables and Excel/PDF downloads aligned.
  */
+
+/** Active Management columns that close the Product Book. One value per product, repeated on each leg row. */
+export const ACTIVE_MANAGEMENT_BOOK_HEADERS = [
+  "Current Internal Rate of Return",
+  "Expected Internal Rate of Return at Assumed Level",
+  "Actual Target",
+  "Effective Target",
+  "Observations Passed",
+  "Observations Left",
+  "Observation Start Date",
+  "Observation End Date",
+  "Next Observation Date",
+  "Average So Far",
+  "Observation Status",
+] as const;
+
 export const PRODUCT_BOOK_HEADERS = [
   "Sr. No.",
   "Product Name",
@@ -35,6 +51,7 @@ export const PRODUCT_BOOK_HEADERS = [
   "Product Premium Amount",
   "Unwind Option Price",
   "Premium Outflow Amount",
+  ...ACTIVE_MANAGEMENT_BOOK_HEADERS,
 ] as const;
 
 export const POST_OBSERVATION_HEADERS = [
@@ -137,4 +154,15 @@ export const PRODUCT_BOOK_SOURCE_MAP: ReadonlyArray<{
   { header: "Product Premium Amount", source: "engine", xlsmOrNote: "Product Price × −Required Quantity" },
   { header: "Unwind Option Price", source: "engine", xlsmOrNote: "Options Book unwind mark (expired Sell put = intrinsic)" },
   { header: "Premium Outflow Amount", source: "engine", xlsmOrNote: "Options Book premium outflow for the leg" },
+  { header: "Current Internal Rate of Return", source: "engine", xlsmOrNote: "Client Internal Rate of Return capped at Product Internal Rate of Return" },
+  { header: "Expected Internal Rate of Return at Assumed Level", source: "engine", xlsmOrNote: "Client Internal Rate of Return of the unwind at the Assumed Nifty or Sensex Level, capped at Product Internal Rate of Return" },
+  { header: "Actual Target", source: "master", xlsmOrNote: "Target Nifty, else the highest originally sold Put strike" },
+  { header: "Effective Target", source: "engine", xlsmOrNote: "Average the observations left must print for the final average to reach the Actual Target" },
+  { header: "Observations Passed", source: "engine", xlsmOrNote: "Option Expiry Dates on or before the as-of day" },
+  { header: "Observations Left", source: "engine", xlsmOrNote: "Option Expiry Dates after the as-of day" },
+  { header: "Observation Start Date", source: "master", xlsmOrNote: "Earliest Option Expiry Date" },
+  { header: "Observation End Date", source: "master", xlsmOrNote: "Latest Option Expiry Date" },
+  { header: "Next Observation Date", source: "engine", xlsmOrNote: "First Option Expiry Date after the as-of day" },
+  { header: "Average So Far", source: "engine", xlsmOrNote: "Average index close on the passed Option Expiry Dates" },
+  { header: "Observation Status", source: "engine", xlsmOrNote: "No Observations, Not Started, Observations Live or Observations Done" },
 ];

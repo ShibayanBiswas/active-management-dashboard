@@ -137,8 +137,24 @@ export function interp1(xs: number[], ys: number[], x: number): number {
   return Number.isFinite(v) ? v : 0;
 }
 
+/**
+ * Normalised grid per surface object. interpolateVolPercent normalises on every leg, which was
+ * about 97% of an unwind. Surfaces are treated as immutable: edits clone first (cloneSurface in
+ * the surface editor), so a cached grid can never go stale. The output maps to itself.
+ */
+const NORMALIZED = new WeakMap<VolSurface, VolSurface>();
+
 /** Sort expiries and strike-percent columns so bilinear lookup stays correct after edits. */
 export function normalizeVolSurface(surface: VolSurface): VolSurface {
+  const hit = NORMALIZED.get(surface);
+  if (hit) return hit;
+  const out = normalizeVolSurfaceUncached(surface);
+  NORMALIZED.set(surface, out);
+  NORMALIZED.set(out, out);
+  return out;
+}
+
+function normalizeVolSurfaceUncached(surface: VolSurface): VolSurface {
   const expiryPairs = surface.expiries
     .map((expiry, i) => ({ expiry, vols: [...(surface.volsPercent[i] ?? [])] }))
     .filter((row) => Number.isFinite(parseISODate(row.expiry).getTime()))
