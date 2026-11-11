@@ -210,6 +210,7 @@ export function BookScenarioTable() {
             tabs={BOOK_SCENARIO_METRICS.map((item) => ({ id: item.id, label: item.label }))}
             active={metricId}
             onSelect={(id) => setMetricId(id as BookScenarioMetricId)}
+            scroll
           />
         </LayoutGroup>
       </div>

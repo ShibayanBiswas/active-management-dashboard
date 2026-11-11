@@ -129,10 +129,13 @@ function show(value: number | null, pending: boolean, kind: "rupee" | "pct" | "i
   return formatDeskRupees(value);
 }
 
+/** The Product Book quote, with the Active Management block when it has been priced. */
+type PostObservationQuote = ProductBookQuoteView & { am?: { expectedDifferenceRs: number | null } | null };
+
 export function postObservationCells(
   serial: number,
   product: ProductMaster,
-  quote: ProductBookQuoteView | null,
+  quote: PostObservationQuote | null,
 ): ExcelCell[] {
   const pending = quote == null;
   const figures = postObservationFigures(product, quote);
@@ -162,6 +165,8 @@ export function postObservationCells(
     live(figures.premGrownValueRs),
     live(figures.premiumOutflowRs),
     live(figures.difference),
+    // Expected Difference at maturity (docs/11), the same figure as the Product Book column.
+    live(quote?.am?.expectedDifferenceRs ?? null),
   ];
   if (row.length !== POST_OBSERVATION_HEADERS.length) {
     throw new Error("Post Observation row width does not match headers");
@@ -172,7 +177,7 @@ export function postObservationCells(
 export function postObservationDisplayRow(
   serial: number,
   product: ProductMaster,
-  quote: ProductBookQuoteView | null,
+  quote: PostObservationQuote | null,
 ): string[] {
   const pending = quote == null;
   const cells = postObservationCells(serial, product, quote);
@@ -194,7 +199,7 @@ export function postObservationDisplayRow(
 export function postObservationExcelRow(
   serial: number,
   product: ProductMaster,
-  quote: ProductBookQuoteView | null,
+  quote: PostObservationQuote | null,
 ): ExcelCell[] {
   return postObservationCells(serial, product, quote);
 }

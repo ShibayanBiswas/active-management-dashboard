@@ -83,6 +83,7 @@ export const POST_OBSERVATION_HEADERS = [
   "Premium Grown Value Rupees",
   "Premium Outflow",
   "Difference",
+  "Expected Difference",
 ] as const;
 
 export const OPTION_BOOK_HEADERS = [

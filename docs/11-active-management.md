@@ -77,10 +77,12 @@ They are one value per product, merged across its leg rows on screen and in both
 
 **Desk Book.** A Bid Ask Spread tab shows each surface expiry with its spread and the bucket schedule.
 
+**Post Observation Analytics.** Expected Difference follows Difference, the same figure as the Product Book column, on screen and in its Excel download. For a product whose options all settled at nothing it is about ₹0.00, because the NBFC book grows to the payout by maturity; otherwise it is the settled option cash carried to maturity.
+
 **Scenario Table.** It sits below Post Observation Analytics.
 - Rows are products. The columns are the 21 index levels from −1,000 to +1,000 points around today's spot, in steps of 100.
 - It has the Product Book's own filters, built from the same functions.
-- Measure tabs: Unwind Quote Amount, Premium Outflow, Unwind Value, Current Internal Rate of Return and Expected Difference, each with a Change In tab measured against the 0 column.
+- Measure tabs: Unwind Quote Amount, Premium Outflow, Unwind Value, Current Internal Rate of Return and Expected Difference, each with a Change In tab measured against the 0 column. They sit on one row that scrolls sideways at every width.
 - Load Scenario Table prices the rows on screen first. Clicking a row opens the product.
 - Export View and Export Workbook write one sheet per measure.
 

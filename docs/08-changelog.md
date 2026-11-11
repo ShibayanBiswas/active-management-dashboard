@@ -40,7 +40,12 @@ introduced).
 **Home:** a book-wide Scenario Table below Post Observation Analytics:
 - products × 21 levels from −1,000 to +1,000;
 - the Product Book's filters, shared through `lib/multi/book-filters.ts`;
-- measure tabs, and Excel with one sheet per measure.
+- measure tabs on one row that scrolls sideways at every width, and Excel with one sheet per
+  measure.
+
+**Post Observation Analytics:** an Expected Difference column after Difference, on screen and
+in its Excel download. It is the Product Book's figure, so a product whose options settled at
+nothing reads about ₹0.00: its NBFC book grows to the payout by maturity.
 
 **Engine:**
 - Client and Residual Internal Rate of Return are shown no higher than Product Internal

@@ -30,6 +30,7 @@ const RUPEE_COLS = new Set([
   "Premium Grown Value Rupees",
   "Premium Outflow",
   "Difference",
+  "Expected Difference",
 ]);
 
 function matchesQuery(product: ProductMaster, needle: string): boolean {

@@ -70,13 +70,21 @@ export function SubPageTabs({
   tabs,
   active,
   onSelect,
+  scroll = false,
 }: {
   tabs: Array<{ id: string; label: string }>;
   active: string;
   onSelect: (id: string) => void;
+  /** One row that scrolls sideways at every width, instead of wrapping from `sm` up. */
+  scroll?: boolean;
 }) {
   return (
-    <div className="subpage-tabs flex flex-nowrap items-center gap-1.5 overflow-x-auto rounded-2xl border border-stone-200 bg-stone-100 p-1.5 dark:border-[color:var(--ar-border)] dark:bg-[color:var(--ar-panel)] sm:gap-2 sm:flex-wrap sm:overflow-visible">
+    <div
+      className={cn(
+        "subpage-tabs flex flex-nowrap items-center gap-1.5 overflow-x-auto rounded-2xl border border-stone-200 bg-stone-100 p-1.5 dark:border-[color:var(--ar-border)] dark:bg-[color:var(--ar-panel)] sm:gap-2",
+        !scroll && "sm:flex-wrap sm:overflow-visible",
+      )}
+    >
       {tabs.map((tab) => {
         const isActive = tab.id === active;
         return (
@@ -84,7 +92,8 @@ export function SubPageTabs({
             key={tab.id}
             type="button"
             className={cn(
-              "relative flex-1 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold transition-all sm:px-4 sm:py-2.5 sm:text-sm",
+              "relative whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold transition-all sm:px-4 sm:py-2.5 sm:text-sm",
+              scroll ? "flex-none" : "flex-1",
               isActive
                 ? "text-maroon dark:text-[#a89860]"
                 : "text-stone-600 hover:bg-white hover:text-ink dark:text-stone-500 dark:hover:text-stone-300",
