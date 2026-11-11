@@ -25,6 +25,9 @@ const RUPEE_HEADERS = new Set([
   "Premium Grown Value Rupees",
   "Unwind Value",
   "Book Unwind Per Debenture",
+  "Expected Difference",
+  "Exit Value",
+  "Mobilization",
 ]);
 
 const PERCENT_HEADERS = new Set([
@@ -51,7 +54,7 @@ const PERCENT_HEADERS = new Set([
   "Product Discounting Rate",
   "Premium Discounting Rate",
   "Current Internal Rate of Return",
-  "Expected Internal Rate of Return at Assumed Level",
+  "Expected Internal Rate of Return",
 ]);
 
 const INTEGER_HEADERS = new Set([

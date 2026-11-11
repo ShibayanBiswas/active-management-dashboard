@@ -23,7 +23,7 @@ Without `MONGODB_URI` the desk still runs on the seeds: `lib/data/multi-products
 `persisted: false` and live only in that server process. The collections are the
 Unwinding Calculator's multi layout (`vol_surfaces`, `multi_products`, `upload_logs`) inside
 `MONGODB_DB`; see [05 — MongoDB and seeding](05-mongodb-and-seed.md). `npm run seed`
-writes the October surface and the multi book to that database.
+writes the November surface and the multi book to that database.
 
 ## Release
 
@@ -31,7 +31,7 @@ writes the October surface and the multi book to that database.
 2. CI (`.github/workflows/ci.yml`) runs `npm ci`, typecheck, lint, knip, the offline verify
    scripts and the build. Docs-only pushes skip CI.
 3. After green CI on `main`, Production Smoke (`.github/workflows/production-smoke.yml`)
-   waits for the deployment, checks that `/`, `/portfolio/unwinding`, `/portfolio/pricer`,
+   waits for the deployment, checks that `/`, `/portfolio/unwinding`,
    `/intelligence` and `/upload` answer 200 and that `/api/multi/dataset` returns the book.
    On failure it opens an issue.
 

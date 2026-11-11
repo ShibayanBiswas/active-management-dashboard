@@ -9,7 +9,7 @@ loosening a tolerance until you understand whether the engine or the fixture mov
 ```bash
 npm install
 npm run bake             # rebuild product-master + golden-parity JSON (on the frozen September golden surface)
-npm run bake:vol -- "<surface.xlsx>" 2026-10  # monthly vol seed: Deep = 55%, passed expiries dropped, Yahoo 1st-session anchors
+npm run bake:vol -- "<surface.xlsx>" 2026-11  # monthly vol seed: Deep = 55%, passed expiries dropped, Yahoo closes on or before the 1st
 npm run collate:multi    # FY21–FY27 multi book → seed JSON (+ Mongo when URI set); also syncs New Primary expiries
 npx tsx scripts/sync-observation-expiries.ts  # rewrite option expiries from Secondary New Primary Observation Average 1–7
 npm run build:samples    # clean sample workbooks (28-col master, light headers, compact cells, live formulas)
@@ -20,7 +20,7 @@ npm run verify:edge      # expired intrinsic: sell pays, buy receives / zero-ten
 npm run verify:pricer    # 40 golden pricer-row assertions
 npm run verify:samples   # sample files → parsers → values; native XLSM Pricing Params layout
 npm run verify:upload    # sample schema, desk routing, extra expiry/percent; local upload e2e when 3006 is up
-npm run verify:vol-expiries  # October 2026 expiries 27-Oct-26 … 26-Mar-31, Deep = 55%, anchors, on seed / sample / live
+npm run verify:vol-expiries  # November 2026 expiries 23-Nov-26 … 26-Mar-31, Deep = 55%, anchors, on seed / sample / live
 npm run verify:xlsm      # replay Calculator / Main Master / Pricer on the sample XLSM surface
 npm run verify:exports   # Options Book PDF layout (11 cols, no Quantity Rounded); Excel sheet count
 npm run verify:levels    # Initial Underlying Level + Contingent Level header/quote lock
@@ -112,8 +112,8 @@ rates. A missing header or a renamed bump label fails the parser.
 
 ### `verify:vol-expiries` — `scripts/verify-vol-expiries.ts`
 
-Locks the fourteen October 2026 dates from `Vol Surface for Oct26.xlsx` (27-Oct-26 through
-26-Mar-31), Deep · ₹500 equal to the 55% column, Forward Sell Rate 6.60% and the 1 Oct 2026
+Locks the fourteen November 2026 dates from `Final Surface Nov 26.xlsx` (23-Nov-26 through
+26-Mar-31), Deep · ₹500 equal to the 55% column, Forward Sell Rate 6.60% and the 1 Nov 2026
 anchors on the seed, the public seed, the sample workbook, and live `/api/multi/dataset`.
 
 ### `verify:xlsm` — `scripts/verify-xlsm.ts`
@@ -158,7 +158,7 @@ Buy and Sell of the same Put correctly share one BS delta.
 
 Run with `npm run dev` on 3006. Locks Markdown preview (one H1, even fences, relative
 links), the shared 28 Product Master headers on both samples, every desk route HTTP 200,
-the multi dataset shape (14 October expiries / 6.60 percent forward; live products under the
+the multi dataset shape (14 November expiries / 6.60 percent forward; live products under the
 2,505-product book, more than 50,000 live legs, product 1567 present), Yahoo market levels,
 and a finite live Product Book quote for product 1567 from `POST /api/multi/quotes`. If
 port 3006 is down, docs and header checks still run and the HTTP block is skipped.
@@ -204,13 +204,13 @@ port 3006 is down, docs and header checks still run and the HTTP block is skippe
 Run these in order.
 
 1. `npm run verify`
-2. Hit `/`, `/portfolio/unwinding`, `/portfolio/pricer`, `/intelligence` and `/upload` —
+2. Hit `/`, `/portfolio/unwinding`, `/intelligence` and `/upload` —
    all 200
 3. Home Desk Book: all **28** Product Master headers visible with H+V scroll;
    cream/gold Primary SP header chrome (maroon uppercase labels); Volatility Surface shows
-  Deep through 150% and 14 live expiries (27-Oct-26 → 26-Mar-31), Deep equal to 55%, one cell per vol
+  Deep through 150% and 14 live expiries (23-Nov-26 → 26-Mar-31), Deep equal to 55%, one cell per vol
   (no merged repeats), with Nifty Strikes and Sensex Strikes above Expiry Date;
-  Surface Parameters shows Reference Nifty Price ₹ 22,421.95, Reference Sensex Price ₹ 71,909.70
+  Surface Parameters shows Reference Nifty Price ₹ 23,053.10, Reference Sensex Price ₹ 74,459.53
   and 6.60% Forward Sell Rate. Home Desk Snapshot has no Expiries
   Tracked card (that count is Surface Parameters only). On `/`, Product Master
   observation tabs keep every Option Expiry Date for a product

@@ -12,8 +12,9 @@ import {
 } from "lucide-react";
 
 import { ActiveManagementTab } from "@/components/active-management/active-management-tab";
-import type { UnwindBasis } from "@/components/active-management/am-table";
+import { CardGrid, type UnwindBasis } from "@/components/active-management/am-table";
 import { ProductPricerTab } from "@/components/active-management/product-pricer-tab";
+import { scenarioGridFor } from "@/components/active-management/scenario-grid-runner";
 import { ScenarioGridTab } from "@/components/active-management/scenario-grid-tab";
 import { UnwindInputPanel } from "@/components/dashboard/unwind-input-panel";
 import {
@@ -22,7 +23,6 @@ import {
   Panel,
   PrimaryButton,
   SectionTitle,
-  SpecRail,
   SubPageTabs,
 } from "@/components/layout/app-ui";
 import { HorizontalBand } from "@/components/layout/horizontal-rail";
@@ -30,10 +30,13 @@ import { DeskLoadingState } from "@/components/ui/desk-loading";
 import { RevealOutput } from "@/components/ui/reveal-output";
 import { cn } from "@/lib/cn";
 import { useDataset } from "@/lib/context/dataset-provider";
+import { useMultiQuotes } from "@/lib/context/multi-desk-provider";
 import { collectExpiredLegExpiryDates } from "@/lib/engine/expiry-spots";
 import { computeUnwind } from "@/lib/engine/unwind";
+import { productKey } from "@/lib/multi/product-key";
 import type { OptionTableRow, UnwindResult } from "@/lib/types";
 import {
+  capAtProductIrr,
   computeGroupedRowSpans,
   deskBlank,
   deskPricingSpot,
@@ -42,12 +45,35 @@ import {
   formatNumber,
   formatPct,
 } from "@/lib/utils";
+import {
+  activeManagementTab,
+  productPricerTab,
+  scenarioGridTab,
+  type AmExportDoc,
+} from "@/lib/workbook/am-export-columns";
 import { OPTION_BOOK_HEADERS } from "@/lib/workbook/export-columns";
 import { unwindProductFactRows } from "@/lib/workbook/product-facts";
 import { preloadExcelExport } from "@/lib/workbook/excel-runtime";
 import { OPTION_BOOK_MERGE_COLS } from "@/lib/workbook/table-merge";
 
-type TabId = "quotes" | "facts" | "funding" | "rupees" | "options" | "active" | "pricer" | "scenario";
+const TABS = [
+  { id: "quotes", label: "Unwind Quote and Returns" },
+  { id: "facts", label: "Product Facts" },
+  { id: "funding", label: "NBFC MIS" },
+  { id: "rupees", label: "NBFC Book Values" },
+  { id: "options", label: "Options Book" },
+  { id: "active", label: "Active Management" },
+  { id: "pricer", label: "Pricer Table" },
+  { id: "scenario", label: "Scenario Grid" },
+] as const;
+
+type TabId = (typeof TABS)[number]["id"];
+
+/** A tab named in the address, as in /portfolio/unwinding?tab=pricer from the Logic Atlas. */
+function tabFromAddress(): TabId | null {
+  const asked = new URLSearchParams(window.location.search).get("tab");
+  return TABS.find((t) => t.id === asked)?.id ?? null;
+}
 
 function formatRs(v: number | null | undefined): string {
   return formatDeskRupees(v);
@@ -88,32 +114,63 @@ function toOptionDisplayRow(r: OptionTableRow): string[] {
 
 export function UnwindingPage() {
   const { inputs, product, surface, refresh } = useDataset();
+  const { quotes, deskLevels } = useMultiQuotes();
   const [result, setResult] = useState<UnwindResult | null>(null);
   /** What `result` was priced on, expiry closes included — the Active Management tabs reuse it. */
   const [basis, setBasis] = useState<UnwindBasis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>("quotes");
   const [computing, setComputing] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  /** Button text while a download builds; null when idle. */
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const exporting = exportStatus != null;
+
+  useEffect(() => {
+    const asked = tabFromAddress();
+    if (asked) setTab(asked);
+  }, []);
+
+  /**
+   * The Active Management, Pricer Table and Scenario Grid downloads for the unwind on screen,
+   * as their tabs build them. A grid not yet priced is priced here, level by level.
+   */
+  async function activeManagementDocs(on: UnwindBasis): Promise<AmExportDoc[]> {
+    const am = quotes[productKey(on.product)]?.am ?? null;
+    const active = activeManagementTab({
+      ...on,
+      actualTarget: am?.actualTarget ?? null,
+      actualTargetSource: am?.actualTargetSource ?? null,
+      deskLevels,
+    });
+    const pricer = productPricerTab(on);
+    const grid = await scenarioGridFor(on, {
+      onLevel: (done, total) => setExportStatus(`Pricing Scenario Grid ${Math.min(done + 1, total)} Of ${total}…`),
+    });
+    setExportStatus("Building…");
+    return [active.doc, pricer.doc, ...(grid ? [scenarioGridTab(grid).doc] : [])];
+  }
 
   async function runExport(kind: "excel" | "pdf" | "options-pdf") {
-    if (!result || exporting) return;
-    setExporting(true);
+    if (!result || !basis || exporting) return;
+    const on = basis;
+    setExportStatus("Building…");
     try {
       if (kind === "excel") {
+        const tabs = await activeManagementDocs(on);
         const { downloadUnwindScreenExcel } = await import("@/lib/workbook/export-screen");
-        await downloadUnwindScreenExcel(result);
+        await downloadUnwindScreenExcel(on.result, tabs);
       } else if (kind === "options-pdf") {
         const { downloadOptionsBookPdf } = await import("@/lib/workbook/export-screen");
-        await downloadOptionsBookPdf(result);
+        await downloadOptionsBookPdf(on.result);
       } else {
+        const tabs = await activeManagementDocs(on);
         const { downloadUnwindScreenPdf } = await import("@/lib/workbook/export-screen");
-        await downloadUnwindScreenPdf(result);
+        await downloadUnwindScreenPdf(on.result, tabs);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Export failed");
     } finally {
-      setExporting(false);
+      setExportStatus(null);
     }
   }
 
@@ -124,7 +181,9 @@ export function UnwindingPage() {
   const surfaceRevision = surface
     ? `${surface.monthKey}|${surface.expiries.length}|${surface.pricingParams?.[0]?.fwdSellRate ?? ""}|${surface.pricingParams?.[0]?.volBump ?? ""}|${surface.referenceUnderlyingPrice ?? ""}|${surface.volsPercent[0]?.[0] ?? ""}|${surface.volsPercent[5]?.[5] ?? ""}`
     : "";
-  const resetKey = `${inputs.underlying}|${inputs.unwindDate}|${inputs.debentures}|${inputs.bidAskSpread ?? 0}|${product?.productName ?? ""}|${product?.productCode ?? ""}|${productRevision}|${surfaceRevision}`;
+  // Blank spread (the Bid Ask table) and 0 (no spread) price differently, so they key differently.
+  const spreadKey = inputs.bidAskSpread ?? "table";
+  const resetKey = `${inputs.underlying}|${inputs.unwindDate}|${inputs.debentures}|${spreadKey}|${product?.productName ?? ""}|${product?.productCode ?? ""}|${productRevision}|${surfaceRevision}`;
 
   useEffect(() => {
     preloadExcelExport();
@@ -132,7 +191,7 @@ export function UnwindingPage() {
   }, [refresh]);
 
   // Primitive key — avoid re-running on every new `inputs` object identity from context.
-  const computeKey = `${pricingSpot ?? ""}|${inputs.unwindDate}|${inputs.debentures}|${inputs.bidAskSpread ?? 0}|${inputs.underlying}|${product?.productName ?? ""}|${product?.productCode ?? ""}|${productRevision}|${surfaceRevision}`;
+  const computeKey = `${pricingSpot ?? ""}|${inputs.unwindDate}|${inputs.debentures}|${spreadKey}|${inputs.underlying}|${product?.productName ?? ""}|${product?.productCode ?? ""}|${productRevision}|${surfaceRevision}`;
   const resultRef = useRef<UnwindResult | null>(null);
   resultRef.current = result;
 
@@ -235,12 +294,12 @@ export function UnwindingPage() {
                     title={
                       computing || !result
                         ? "Wait until unwind marks finish loading"
-                        : "Download Unwinding Summary and Options Book Excel"
+                        : "Download Unwinding Summary, Options Book, Active Management, Pricer Table and Scenario Grid Excel"
                     }
                     onClick={() => void runExport("excel")}
                   >
                     <Download className="h-4 w-4" />
-                    {exporting ? "Building…" : "Download Excel"}
+                    {exportStatus ?? "Download Excel"}
                   </PrimaryButton>
                   <GhostButton
                     type="button"
@@ -248,12 +307,12 @@ export function UnwindingPage() {
                     title={
                       computing || !result
                         ? "Wait until unwind marks finish loading"
-                        : "Download Unwinding Summary PDF"
+                        : "Download Unwinding Summary, Active Management, Pricer Table and Scenario Grid PDF"
                     }
                     onClick={() => void runExport("pdf")}
                   >
                     <FileText className="h-4 w-4" />
-                    {exporting ? "Building…" : "Download PDF"}
+                    {exportStatus ?? "Download PDF"}
                   </GhostButton>
                 </div>
               ) : null
@@ -280,33 +339,20 @@ export function UnwindingPage() {
               </Panel>
             ) : (              <>
                 <HorizontalBand>
-                  <SubPageTabs
-                    tabs={[
-                      { id: "quotes", label: "Unwind Quote and Returns" },
-                      { id: "facts", label: "Product Facts" },
-                      { id: "funding", label: "NBFC MIS" },
-                      { id: "rupees", label: "NBFC Book Values" },
-                      { id: "options", label: "Options Book" },
-                      { id: "active", label: "Active Management" },
-                      { id: "pricer", label: "Black Scholes Pricer" },
-                      { id: "scenario", label: "Scenario Grid" },
-                    ]}
-                    active={tab}
-                    onSelect={(id) => setTab(id as TabId)}
-                  />
+                  <SubPageTabs tabs={[...TABS]} active={tab} onSelect={(id) => setTab(id as TabId)} />
                 </HorizontalBand>
 
                 {tab === "quotes" ? (
                   <Panel>
                     <SectionTitle icon={Percent}>Unwind Quote and Internal Rates of Return</SectionTitle>
-                    <SpecRail
+                    <CardGrid
                       className="mt-1"
                       cards={[
                         { label: "Unwind Quote Percent", value: formatPct(result.unwindQuotePct) },
                         { label: "Unwind Quote Amount", value: formatRs(result.unwindQuoteRs) },
                         { label: "Product Internal Rate of Return", value: formatPct(result.productIRR) },
-                        { label: "Client Internal Rate of Return", value: formatPct(result.clientIRR) },
-                        { label: "Residual Internal Rate of Return", value: formatPct(result.residualIRR) },
+                        { label: "Client Internal Rate of Return", value: formatPct(capAtProductIrr(result.clientIRR, result.productIRR)) },
+                        { label: "Residual Internal Rate of Return", value: formatPct(capAtProductIrr(result.residualIRR, result.productIRR)) },
                       ]}
                     />
                   </Panel>
@@ -315,7 +361,7 @@ export function UnwindingPage() {
                 {tab === "facts" ? (
                   <Panel>
                     <SectionTitle icon={Calculator}>Product Facts</SectionTitle>
-                    <SpecRail
+                    <CardGrid
                       className="mt-1"
                       cards={unwindProductFactRows(result).map(([label, value]) => ({ label, value }))}
                     />
@@ -325,7 +371,7 @@ export function UnwindingPage() {
                 {tab === "funding" ? (
                   <Panel>
                     <SectionTitle icon={Landmark}>NBFC MIS</SectionTitle>
-                    <SpecRail
+                    <CardGrid
                       className="mt-1"
                       cards={[
                         { label: "Total Debentures in Issue", value: formatNumber(result.totalDebs, 0) },
@@ -345,7 +391,7 @@ export function UnwindingPage() {
                 {tab === "rupees" ? (
                   <Panel>
                     <SectionTitle icon={Banknote}>NBFC Book Values</SectionTitle>
-                    <SpecRail
+                    <CardGrid
                       className="mt-1"
                       cards={[
                         {
@@ -385,7 +431,7 @@ export function UnwindingPage() {
                   <div className="flex flex-col gap-4">
                     <Panel className="min-w-0 overflow-hidden !p-0 sm:!p-0">
                       <div className="border-b border-[color:var(--ar-border)] px-4 py-3">
-                        <div className="flex items-start gap-3">
+                        <div className="flex flex-wrap items-start gap-3">
                           <div className="min-w-0 flex-1">
                             <SectionTitle icon={Table2}>Options Book</SectionTitle>
                           </div>

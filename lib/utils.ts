@@ -149,6 +149,16 @@ export function roundTo(n: number, step: number): number {
  * Desk money / option mark to two decimal places (Excel currency / ROUND paisa).
  * Used end-to-end on Pricer prices, Options Book unwind marks, and rupee outflows.
  */
+/**
+ * Client and Residual Internal Rate of Return are shown no higher than the Product Internal
+ * Rate of Return, the most the product pays. With no Product IRR (coupon or tenor 0) the rate
+ * is shown as it is.
+ */
+export function capAtProductIrr(irr: number | null | undefined, productIRR: number | null | undefined): number | null {
+  if (irr == null || !Number.isFinite(irr)) return null;
+  return productIRR != null && productIRR > 0 ? Math.min(irr, productIRR) : irr;
+}
+
 export function roundDeskMoney(n: number): number {
   const x = finiteDeskNumber(n);
   if (x == null) return 0;

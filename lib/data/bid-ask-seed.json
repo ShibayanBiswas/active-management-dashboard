@@ -1,0 +1,10 @@
+{
+  "source": "Active Management workbook (Mar26 Unwind Calculator Auto Surface_Oct _3110.xlsx), sheet Bid Ask A2:B60: 59 option expiries from 27-Jan-2026 to 28-Nov-2030. The spread steps down after the last March expiry of each financial year (30-Mar-2027, 28-Mar-2028, 27-Mar-2029, 28-Mar-2030), so each bucket runs through 31 March. The sheet stores the spread as a decimal (0.0075); spreadPercent is the same in vol percent points (0.75). Px. Comput K uses Surface vol minus s for an original Buy and plus s for an original Sell.",
+  "buckets": [
+    { "through": "2027-03-31", "spreadPercent": 0.75 },
+    { "through": "2028-03-31", "spreadPercent": 0.5 },
+    { "through": "2029-03-31", "spreadPercent": 0.375 },
+    { "through": "2030-03-31", "spreadPercent": 0.25 },
+    { "through": null, "spreadPercent": 0.075 }
+  ]
+}

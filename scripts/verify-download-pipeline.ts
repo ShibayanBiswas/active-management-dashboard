@@ -20,6 +20,14 @@ import {
   PRICER_TABLE_HEADERS,
 } from "../lib/workbook/export-columns";
 import { EXCEL_THEME } from "../lib/workbook/export-theme";
+import { BOOK_SCENARIO_SHIFTS, type BookScenarioRow } from "../lib/active-management/book-scenario";
+import {
+  BOOK_SCENARIO_CENTRE_COL,
+  BOOK_SCENARIO_HEADERS,
+  BOOK_SCENARIO_METRICS,
+  bookScenarioDisplayRow,
+  buildBookScenarioWorkbook,
+} from "../lib/workbook/book-scenario-export";
 import { computeUnwind } from "../lib/engine/unwind";
 import { priceProductBook } from "../lib/engine/pricer";
 import { productsWithLiveMaturity } from "../lib/observation-tabs";
@@ -95,8 +103,49 @@ async function main() {
   const live = productsWithLiveMaturity(allProducts, asOf);
 
   console.log("\n=== Column contracts (desk ≡ download) ===");
-  // 33 Unwinding columns, then the 11 Active Management columns.
-  assert("Product Book header count 44", PRODUCT_BOOK_HEADERS.length === 44, String(PRODUCT_BOOK_HEADERS.length));
+  // 33 Unwinding columns, then the 15 Active Management columns.
+  assert("Product Book header count 48", PRODUCT_BOOK_HEADERS.length === 48, String(PRODUCT_BOOK_HEADERS.length));
+  assert(
+    "Active Management columns in desk order",
+    ACTIVE_MANAGEMENT_BOOK_HEADERS.join("|") ===
+      [
+        "Current Internal Rate of Return",
+        "Expected Internal Rate of Return",
+        "Expected Difference",
+        "Exit Value",
+        "Mobilization",
+        "Actual Target",
+        "Effective Target",
+        "Observations Passed",
+        "Observations Left",
+        "Pending Observations",
+        "Observation Start Date",
+        "Observation End Date",
+        "Next Observation Date",
+        "Average So Far",
+        "Observation Status",
+      ].join("|"),
+    ACTIVE_MANAGEMENT_BOOK_HEADERS.join("|"),
+  );
+  assert(
+    "the first 33 Product Book columns are unchanged",
+    PRODUCT_BOOK_HEADERS.slice(0, 33).join("|") ===
+      [
+        "Sr. No.", "Product Name", "Product Code", "Unwind Quote Amount", "Date As Of Today",
+        "Product Internal Rate of Return", "Client Internal Rate of Return", "Premium Outflow",
+        "Residual Internal Rate of Return", "Face Value", "Initial Underlying Level", "Contingent Coupon",
+        "Inbuilt", "Transaction Cost", "Issuance Cost", "Margin Cost", "Delta Date", "Allotment Date",
+        "Maturity Date", "Tenor", "Invested Tenor", "Residual Tenor", ...OPTION_BOOK_HEADERS,
+      ].join("|"),
+  );
+  assert(
+    "Product Book source map follows the header order",
+    PRODUCT_BOOK_SOURCE_MAP.map((item) => item.header).join("|") === PRODUCT_BOOK_HEADERS.join("|"),
+  );
+  assert(
+    "no Product Book column mentions an assumed level",
+    PRODUCT_BOOK_HEADERS.every((header) => !/assumed/i.test(header)),
+  );
   assert(
     "Premium Outflow sits after Client Internal Rate of Return",
     PRODUCT_BOOK_HEADERS[PRODUCT_BOOK_HEADERS.indexOf("Client Internal Rate of Return") + 1] === "Premium Outflow",
@@ -263,6 +312,10 @@ async function main() {
         assumedLevel: 25000,
         expectedQuoteRs: 101000,
         expectedIrr: 0.11,
+        expectedDifferenceRs: -1234567.891,
+        pendingObservations: "Dec-26, Mar-27 & Sep-27",
+        exitValueRs: 98765432.1,
+        expectedExitValueRs: 99000000,
         warnings: [],
       },
     };
@@ -272,6 +325,39 @@ async function main() {
     assert("screen current IRR is a percent", amScreenCell("Current Internal Rate of Return") === "10.00%", amScreenCell("Current Internal Rate of Return"));
     assert("screen effective target is a level", amScreenCell("Effective Target") === "24,150.50", amScreenCell("Effective Target"));
     assert("screen observation start is a desk date", amScreenCell("Observation Start Date") === "30-Mar-26", amScreenCell("Observation Start Date"));
+    assert("screen Expected Internal Rate of Return is a percent", amScreenCell("Expected Internal Rate of Return") === "11.00%", amScreenCell("Expected Internal Rate of Return"));
+    assert("screen Expected Difference is rupees to the paisa", amScreenCell("Expected Difference") === "₹ -12,34,567.89", amScreenCell("Expected Difference"));
+    assert("screen Exit Value is rupees to the paisa", amScreenCell("Exit Value") === "₹ 9,87,65,432.10", amScreenCell("Exit Value"));
+    assert("screen Pending Observations is the month list", amScreenCell("Pending Observations") === "Dec-26, Mar-27 & Sep-27", amScreenCell("Pending Observations"));
+    assert("screen Mobilization is the master amount in rupees", amScreenCell("Mobilization") === formatDeskRupees(numericProduct.mobilization), amScreenCell("Mobilization"));
+    const pendingMobilization = buildProductBookMatrix({ serial: 1, product: numericProduct, asOf, quote: null }).rows[0] ?? [];
+    assert(
+      "Mobilization shows while the quote is pending",
+      pendingMobilization[PRODUCT_BOOK_HEADERS.indexOf("Mobilization")] === formatDeskRupees(numericProduct.mobilization) &&
+        pendingMobilization[PRODUCT_BOOK_HEADERS.indexOf("Exit Value")] === "…",
+    );
+    const staleScreen = buildProductBookMatrix({ serial: 1, product: numericProduct, asOf, quote: amQuote, expectedPending: true }).rows[0] ?? [];
+    const staleCell = (header: (typeof ACTIVE_MANAGEMENT_BOOK_HEADERS)[number]) => staleScreen[PRODUCT_BOOK_HEADERS.indexOf(header)];
+    assert(
+      "a stale expected level shows Expected Internal Rate of Return and Expected Difference as pending",
+      staleCell("Expected Internal Rate of Return") === "…" && staleCell("Expected Difference") === "…",
+    );
+    assert(
+      "a stale expected level keeps every other cell",
+      ACTIVE_MANAGEMENT_BOOK_HEADERS.filter((h) => h !== "Expected Internal Rate of Return" && h !== "Expected Difference").every(
+        (h) => staleCell(h) === amScreenCell(h),
+      ) && staleScreen.slice(0, -ACTIVE_MANAGEMENT_BOOK_HEADERS.length).join("|") === amScreen[0]!.slice(0, -ACTIVE_MANAGEMENT_BOOK_HEADERS.length).join("|"),
+    );
+    const blankAm = buildProductBookMatrix({
+      serial: 1,
+      product: numericProduct,
+      asOf,
+      quote: { ...amQuote, am: { ...amQuote.am, pendingObservations: null, expectedDifferenceRs: null, exitValueRs: null } },
+    }).rows[0] ?? [];
+    assert(
+      "missing Expected Difference, Exit Value and Pending Observations show a hyphen",
+      (["Expected Difference", "Exit Value", "Pending Observations"] as const).every((h) => blankAm[PRODUCT_BOOK_HEADERS.indexOf(h)] === "-"),
+    );
     assert(
       "screen Active Management cells repeat on every leg row",
       amScreen.every((row) => row.slice(-ACTIVE_MANAGEMENT_BOOK_HEADERS.length).join("|") === amScreen[0]!.slice(-ACTIVE_MANAGEMENT_BOOK_HEADERS.length).join("|")),
@@ -287,9 +373,14 @@ async function main() {
     });
     const amCell = (header: (typeof ACTIVE_MANAGEMENT_BOOK_HEADERS)[number], offset = 1) =>
       amSheet?.getRow(amHeader + offset).getCell(PRODUCT_BOOK_HEADERS.indexOf(header) + 1);
-    for (const header of ["Current Internal Rate of Return", "Expected Internal Rate of Return at Assumed Level"] as const) {
+    for (const header of ["Current Internal Rate of Return", "Expected Internal Rate of Return"] as const) {
       assert(`${header} is a percent number`, typeof amCell(header)?.value === "number" && String(amCell(header)?.numFmt) === "0.00%", String(amCell(header)?.numFmt));
     }
+    for (const header of ["Expected Difference", "Exit Value", "Mobilization"] as const) {
+      assert(`${header} is a rupee number`, typeof amCell(header)?.value === "number" && String(amCell(header)?.numFmt) === '"₹"#,##0.00', String(amCell(header)?.numFmt));
+    }
+    assert("Expected Difference keeps the unrounded value", amCell("Expected Difference")?.value === -1234567.891, String(amCell("Expected Difference")?.value));
+    assert("Pending Observations is text", amCell("Pending Observations")?.value === "Dec-26, Mar-27 & Sep-27", String(amCell("Pending Observations")?.value));
     for (const header of ["Actual Target", "Effective Target", "Average So Far"] as const) {
       assert(`${header} is a two-decimal number`, typeof amCell(header)?.value === "number" && String(amCell(header)?.numFmt) === "#,##0.00", String(amCell(header)?.numFmt));
     }
@@ -301,13 +392,90 @@ async function main() {
     }
     assert("Observation Status is text", amCell("Observation Status")?.value === "Observations Live", String(amCell("Observation Status")?.value));
     if (numericResult.optionRows.length > 1) {
-      assert("Active Management cells merge across the product's legs", amCell("Observation Status", 2)?.isMerged === true);
+      for (const header of ACTIVE_MANAGEMENT_BOOK_HEADERS) {
+        assert(`${header} merges across the product's legs`, amCell(header, 2)?.isMerged === true);
+      }
+      const legPrice = amSheet?.getRow(amHeader + 2).getCell(PRODUCT_BOOK_HEADERS.indexOf("Unwind Option Price") + 1);
+      assert("Unwind Option Price stays one cell per leg", legPrice?.isMerged !== true);
     }
     const unpricedAm = buildProductBookExcelMatrix({ serial: 1, product: numericProduct, asOf, quote: quoteViewFromUnwind(numericResult, asOf) });
+    const mobilizationAt = ACTIVE_MANAGEMENT_BOOK_HEADERS.indexOf("Mobilization");
     assert(
-      "quote without Active Management fields exports hyphens",
-      unpricedAm.every((row) => row.slice(-ACTIVE_MANAGEMENT_BOOK_HEADERS.length).every((cell) => cell === "-")),
+      "quote without Active Management fields exports hyphens, Mobilization still the master amount",
+      unpricedAm.every((row) =>
+        row
+          .slice(-ACTIVE_MANAGEMENT_BOOK_HEADERS.length)
+          .every((cell, i) => (i === mobilizationAt ? cell === numericProduct.mobilization : cell === "-")),
+      ),
     );
+  }
+
+  console.log("\n=== Book Scenario Table download ===");
+  {
+    const [priced, failed] = [live[0]!, live[1]!];
+    const scenarioRow: BookScenarioRow = {
+      underlying: "Nifty",
+      baseSpot: 24366.55,
+      cells: BOOK_SCENARIO_SHIFTS.map((shift) => ({
+        shift,
+        level: 24366.55 + shift,
+        unwindQuoteRs: 100000 + shift * 10.123,
+        premiumOutflowRs: -5000 - shift,
+        unwindValueRs: 9_000_000 + shift * 1000,
+        exitValueRs: 9_000_500 + shift * 1000,
+        currentIrr: shift === 1000 ? null : 0.1 + shift / 100000,
+        expectedDifferenceRs: 1234.567 + shift,
+      })),
+    };
+    const rows: Record<string, BookScenarioRow | null> = { [productKey(priced)]: scenarioRow, [productKey(failed)]: null };
+    assert("scenario headers: 4 identity columns and 21 levels", BOOK_SCENARIO_HEADERS.length === 25, String(BOOK_SCENARIO_HEADERS.length));
+    assert(
+      "scenario level headers run −1,000 … 0 … +1,000",
+      BOOK_SCENARIO_HEADERS[4] === "−1,000" && BOOK_SCENARIO_HEADERS[BOOK_SCENARIO_CENTRE_COL] === "0" && BOOK_SCENARIO_HEADERS[24] === "+1,000",
+      BOOK_SCENARIO_HEADERS.slice(4).join(","),
+    );
+    const metric = (id: (typeof BOOK_SCENARIO_METRICS)[number]["id"]) => BOOK_SCENARIO_METRICS.find((m) => m.id === id)!;
+    const screen = bookScenarioDisplayRow(priced, scenarioRow, metric("unwindQuote"));
+    assert("scenario screen quote is rupees to the paisa", screen[BOOK_SCENARIO_CENTRE_COL] === "₹ 1,00,000.00", screen[BOOK_SCENARIO_CENTRE_COL]);
+    assert("scenario screen base level", screen[3] === "24,366.55", screen[3]);
+    const change = bookScenarioDisplayRow(priced, scenarioRow, metric("unwindQuoteChange"));
+    assert("scenario change is against the 0 column", change[BOOK_SCENARIO_CENTRE_COL] === "₹ 0.00" && change[BOOK_SCENARIO_CENTRE_COL + 1] === "₹ 1,012.30", change.slice(BOOK_SCENARIO_CENTRE_COL).join(" "));
+    const rate = bookScenarioDisplayRow(priced, scenarioRow, metric("currentIrrChange"));
+    assert("scenario rate change is a percent; a blank rate is a hyphen", rate[4] === "-1.00%" && rate[24] === "-", `${rate[4]} ${rate[24]}`);
+    assert("a pending scenario row shows …", bookScenarioDisplayRow(priced, undefined, metric("unwindQuote")).slice(3).every((v) => v === "…"));
+    assert("a failed scenario row shows -", bookScenarioDisplayRow(failed, null, metric("unwindQuote")).slice(3).every((v) => v === "-"));
+
+    const scenarioWb = await buildBookScenarioWorkbook([priced, failed], rows, { viewNote: "Export View · Ongoing" });
+    const names = scenarioWb.worksheets.map((ws) => ws.name);
+    assert("scenario workbook has one sheet per metric", names.join("|") === BOOK_SCENARIO_METRICS.map((m) => m.sheet).join("|"), names.join("|"));
+    assert("scenario sheet names fit Excel's 31 characters", names.every((name) => name.length <= 31) && new Set(names).size === 9);
+    for (const sheet of scenarioWb.worksheets) {
+      let header = 0;
+      sheet.eachRow((row, number) => {
+        if (String(row.getCell(1).value ?? "") === "Product Name") header = number;
+      });
+      const labels = BOOK_SCENARIO_HEADERS.map((_, i) => String(sheet.getRow(header).getCell(i + 1).value ?? ""));
+      assert(`${sheet.name} header row`, header > 0 && labels.join("|") === BOOK_SCENARIO_HEADERS.join("|"));
+      const def = BOOK_SCENARIO_METRICS.find((m) => m.sheet === sheet.name)!;
+      const centre = sheet.getRow(header + 1).getCell(BOOK_SCENARIO_CENTRE_COL + 1);
+      const fmt = def.kind === "rupees" ? '"₹"#,##0.00' : "0.00%";
+      assert(`${sheet.name} level cells are ${def.kind} numbers`, typeof centre.value === "number" && String(centre.numFmt) === fmt, `${centre.value} ${centre.numFmt}`);
+      assert(`${sheet.name} 0 column is shaded`, argbOf(centre.fill) === EXCEL_THEME.goldSoft);
+      const base = sheet.getRow(header + 1).getCell(4);
+      assert(`${sheet.name} base level is a number`, base.value === 24366.55 && String(base.numFmt) === "#,##0.00", `${base.value} ${base.numFmt}`);
+      const failedCells = BOOK_SCENARIO_HEADERS.slice(3).map((_, i) => sheet.getRow(header + 2).getCell(i + 4).value);
+      assert(`${sheet.name} failed product exports hyphens`, failedCells.every((v) => v === "-"));
+      if (def.change) assert(`${sheet.name} 0 column is zero`, centre.value === 0, String(centre.value));
+    }
+    const quoteSheet = scenarioWb.getWorksheet("Unwind Quote Amount");
+    let quoteHeader = 0;
+    quoteSheet?.eachRow((row, number) => {
+      if (String(row.getCell(1).value ?? "") === "Product Name") quoteHeader = number;
+    });
+    const top = quoteSheet?.getRow(quoteHeader + 1).getCell(25).value;
+    assert("scenario +1,000 quote is the unrounded cell", top === 100000 + 1000 * 10.123, String(top));
+    const scenarioBuf = await scenarioWb.xlsx.writeBuffer();
+    assert("scenario xlsx non-empty", scenarioBuf.byteLength > 8_000, String(scenarioBuf.byteLength));
   }
 
   const singleResult = unwindProduct(single, surface);

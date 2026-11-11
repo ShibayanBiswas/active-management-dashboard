@@ -86,8 +86,12 @@ export type UnwindInputs = {
   nifty?: number | null;
   /** Defaults from the product name: Sensex if the name matches Sensex / BSE Sensex, otherwise Nifty. */
   underlying?: UnderlyingIndex | "";
-  /** Bid-ask vol spread, default 0. */
-  bidAskSpread?: number;
+  /**
+   * Bid-ask vol spread z, decimal vol from bid to offer: Sell uses σ − z/2, Buy uses σ + z/2.
+   * null or undefined means the Bid Ask table: each leg takes z = 2 × s(expiry) ÷ 100
+   * (lib/active-management/bid-ask.ts). 0 means no spread.
+   */
+  bidAskSpread?: number | null;
   /** Index close on/before each expired leg expiry (YYYY-MM-DD → spot). */
   expirySpots?: Record<string, number>;
 };
@@ -167,7 +171,8 @@ export type UnwindResult = {
   investedTenorDays: number;
   currentPremOutflowPct: number;
   pricerUnwindValue: number;
-  bidAskSpread: number;
+  /** The flat z the unwind ran with; null when each leg took its Bid Ask table spread (see each Pricer row's bidOffer). */
+  bidAskSpread: number | null;
 
   masterEconomics: MasterEconomics;
   optionRows: OptionTableRow[];

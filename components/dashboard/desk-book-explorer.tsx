@@ -5,6 +5,7 @@ import { Check, Database, Pencil, Plus, RefreshCw, Search, Trash2, X } from "luc
 
 import { GhostButton, Panel, PrimaryButton, SectionTitle, SpecRail, SubPageTabs } from "@/components/layout/app-ui";
 import { DeskDialog } from "@/components/ui/desk-dialog";
+import { BID_ASK_BUCKETS, bidAskTableRows } from "@/lib/active-management/bid-ask";
 import { useDataset } from "@/lib/context/dataset-provider";
 import { useMultiDeskOptional } from "@/lib/context/multi-desk-provider";
 import { DEFAULT_FWD_SELL_RATE, referenceSensexPrice, referenceUnderlyingPrice, INDEX_STRIKE_PRICE_DECIMALS } from "@/lib/engine/vol-surface";
@@ -36,7 +37,7 @@ import {
   deskColToMasterCol,
 } from "@/lib/workbook/master-columns";
 
-type ExplorerTab = "master" | "surface" | "params";
+type ExplorerTab = "master" | "surface" | "params" | "bidask";
 
 /** Same headers on Single and Multiple Product desks (Contingent Level omitted — equals Initial Underlying Level). */
 const MASTER_HEADERS = DESK_MASTER_HEADERS;
@@ -350,6 +351,83 @@ function moneynessLabel(index: number, moneyness: number[]): string {
   const m = moneyness[index - 1];
   if (m == null) return "-";
   return `${Math.round(m * 100)}%`;
+}
+
+/** Spread in volatility percent points, e.g. 0.75 → 0.750%. */
+function spreadText(spreadPercent: number): string {
+  return `${formatNumber(spreadPercent, 3)}%`;
+}
+
+/** Each surface expiry's bid ask spread and the schedule it comes from. Read only; it follows the surface. */
+function BidAskSpreadTables({ surface }: { surface: VolSurface }) {
+  const rows = bidAskTableRows(surface);
+  return (
+    <div className="min-w-0 space-y-4 p-4">
+      <p className="text-xs text-muted">
+        An option originally bought is priced at the surface volatility minus the spread, and one originally sold at
+        the surface volatility plus the spread.
+      </p>
+      <div className="min-w-0">
+        <p className="label-chip mb-2">Spread At Each Surface Expiry</p>
+        <div className="desk-table-scroll">
+          <table className="data-table-premium data-table-fill text-sm">
+            <thead>
+              <tr>
+                <th className="col-pinned whitespace-nowrap px-3 py-2 text-left">Option Expiry Date</th>
+                <th className="whitespace-nowrap px-3 py-2 text-left">Bid Ask Spread</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-10 text-center text-muted" colSpan={2}>
+                    The Volatility Surface has no expiries.
+                  </td>
+                </tr>
+              ) : (
+                rows.map((row, i) => (
+                  <tr key={`bid-ask-${i}-${row.expiry}`} className={i % 2 === 1 ? "data-table-row-alt" : undefined}>
+                    <td className="col-pinned whitespace-nowrap px-3 py-2 font-semibold">{formatDeskDate(row.expiry)}</td>
+                    <td className="cell-value px-3 py-2 tabular-nums">{spreadText(row.spreadPercent)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="min-w-0">
+        <p className="label-chip mb-2">Bucket Schedule</p>
+        <div className="desk-table-scroll">
+          <table className="data-table-premium data-table-fill text-sm">
+            <thead>
+              <tr>
+                <th className="col-pinned whitespace-nowrap px-3 py-2 text-left">Option Expiry</th>
+                <th className="whitespace-nowrap px-3 py-2 text-left">Bid Ask Spread</th>
+              </tr>
+            </thead>
+            <tbody>
+              {BID_ASK_BUCKETS.map((bucket, i) => {
+                const previous = BID_ASK_BUCKETS[i - 1]?.through;
+                const label =
+                  bucket.through != null
+                    ? `Through ${formatDeskDate(bucket.through)}`
+                    : previous
+                      ? `After ${formatDeskDate(previous)}`
+                      : "Every Expiry";
+                return (
+                  <tr key={`bucket-${i}`} className={i % 2 === 1 ? "data-table-row-alt" : undefined}>
+                    <td className="col-pinned whitespace-nowrap px-3 py-2 font-semibold">{label}</td>
+                    <td className="cell-value px-3 py-2 tabular-nums">{spreadText(bucket.spreadPercent)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function VolSurfaceGrid({
@@ -878,6 +956,7 @@ export function DeskBookExplorer({
               { id: "master", label: "Product Master" },
               { id: "surface", label: "Volatility Surface" },
               { id: "params", label: "Surface Parameters" },
+              { id: "bidask", label: "Bid Ask Spread" },
             ]}
             active={tab}
             onSelect={(id) => {
@@ -1171,6 +1250,8 @@ export function DeskBookExplorer({
           onInvalid={setEditError}
         />
       ) : null}
+
+      {ready && tab === "bidask" && displaySurface ? <BidAskSpreadTables surface={displaySurface} /> : null}
 
       {ready && tab === "params" && displaySurface ? (
         <div className="min-w-0 space-y-4 p-4">

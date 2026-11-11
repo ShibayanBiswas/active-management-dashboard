@@ -43,11 +43,6 @@ export const mainSections: MainNavItem[] = [
         label: "Unwinding Calculator",
         match: (p) => p.startsWith("/portfolio/unwinding"),
       },
-      {
-        href: "/portfolio/pricer",
-        label: "Pricer Table",
-        match: (p) => p.startsWith("/portfolio/pricer"),
-      },
     ],
   },
   {

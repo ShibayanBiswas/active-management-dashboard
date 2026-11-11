@@ -27,6 +27,7 @@ import type { ExcelCell } from "@/lib/workbook/excel-cells";
 import { writeExcelCell } from "@/lib/workbook/excel-cells";
 import type { PricerRow, UnwindResult } from "@/lib/types";
 import {
+  capAtProductIrr,
   computeGroupedRowSpans,
   deskBlank,
   deskTodayISO,
@@ -64,7 +65,7 @@ function inputRows(result: UnwindResult): KV {
     ["Underlying", deskBlank(result.underlying || "")],
     ["Number of Debentures", result.debentures],
     ["Unwinding Date", excelDate(result.unwindDate)],
-    ["Bid Ask Spread", result.bidAskSpread ?? 0],
+    ["Bid Ask Spread", result.bidAskSpread ?? "As Per Bid Ask Table"],
     ["Underlying Spot Level", result.spot],
   ];
 }
@@ -74,8 +75,8 @@ function quoteRows(result: UnwindResult): KV {
     ["Unwind Quote Percent", result.unwindQuotePct],
     ["Unwind Quote Amount", result.unwindQuoteRs],
     ["Product Internal Rate of Return", result.productIRR],
-    ["Client Internal Rate of Return", result.clientIRR],
-    ["Residual Internal Rate of Return", result.residualIRR],
+    ["Client Internal Rate of Return", capAtProductIrr(result.clientIRR, result.productIRR)],
+    ["Residual Internal Rate of Return", capAtProductIrr(result.residualIRR, result.productIRR)],
   ];
 }
 

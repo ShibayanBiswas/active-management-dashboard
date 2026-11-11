@@ -2,9 +2,15 @@
  * Active Management tabs on the Unwinding page: labels, headers, screen rows and Excel rows.
  * The screen tables, the Excel download and the PDF download all read these, so they agree.
  */
-import { irrSet, type IrrFlags, type IrrSet } from "@/lib/active-management/irr";
-import { observationFacts, type ObservationFacts } from "@/lib/active-management/observations";
-import type { ProductPricerRow } from "@/lib/active-management/pricer-table";
+import { bookValue } from "@/lib/active-management/book-value";
+import { irrSet, type IrrFlags } from "@/lib/active-management/irr";
+import { expectedDifferenceAtMaturity } from "@/lib/active-management/maturity";
+import {
+  observationFacts,
+  pendingObservationsText,
+  type ObservationFacts,
+} from "@/lib/active-management/observations";
+import { productPricerTable, type ProductPricerRow } from "@/lib/active-management/pricer-table";
 import { expectedIrrAtLevel, type ScenarioGrid } from "@/lib/active-management/scenario";
 import { residualTarget } from "@/lib/active-management/targets";
 import type { ProductMaster, UnderlyingIndex, UnwindInputs, UnwindResult, VolSurface } from "@/lib/types";
@@ -68,6 +74,12 @@ const day = (iso: string | null): ExcelCell => {
 const levelValue = (label: string, v: number | null): AmValue => ({ label, text: level(v), excel: num(v), numFmt: LEVEL_FMT });
 const countValue = (label: string, v: number): AmValue => ({ label, text: formatNumber(v, 0), excel: v, numFmt: COUNT_FMT });
 const pctValue = (label: string, v: number | null): AmValue => ({ label, text: formatPct(v), excel: num(v), numFmt: PERCENT_FMT });
+const rupeeValue = (label: string, v: number | null): AmValue => ({
+  label,
+  text: formatDeskRupees(v),
+  excel: num(v),
+  numFmt: RUPEES_FMT,
+});
 const dateValue = (label: string, iso: string | null): AmValue => ({ label, text: formatDeskDate(iso), excel: day(iso) });
 const textValue = (label: string, v: string | null): AmValue => ({ label, text: deskBlank(v), excel: deskBlank(v) });
 
@@ -80,53 +92,73 @@ function underlyingOf(product: ProductMaster, inputs: UnwindInputs): UnderlyingI
 /* ── Active Management ─────────────────────────────────────────────────── */
 
 type ActiveManagementFigures = {
-  underlying: UnderlyingIndex;
   actualTarget: number | null;
   actualTargetSource: string | null;
   effectiveTarget: number | null;
   facts: ObservationFacts;
-  irr: IrrSet;
-  /** Index level Expected IRR was priced at. */
-  assumedLevel: number;
-  /** False when no assumed level is set, so the underlying spot level was used. */
-  assumedLevelSet: boolean;
+  /** Today's desk spot for the underlying; null while it is not known. */
+  currentLevel: number | null;
+  /** The page's Spot Level: the level the unwind on screen ran at. */
+  expectedLevel: number;
+  /** Capped Client rate at the Current Level, on the page's date, debentures and spread. */
+  currentIrr: number | null;
+  currentFlags: IrrFlags | null;
+  /** Capped Client rate of the unwind on screen. */
   expectedIrr: number | null;
   expectedFlags: IrrFlags;
+  /** True when the Current Level is the page's level, so Current is the unwind on screen. */
+  currentIsExpected: boolean;
+  /** Expected Difference at Maturity of the unwind on screen. */
+  expectedDifferenceRs: number | null;
+  /** Exit Value at the Current Level: Unwind Value plus the carry on settled option cash (workbook BH). */
+  exitValueRs: number | null;
 };
 
 /**
  * Active Management figures for the unwind on screen. `inputs` are the inputs that unwind ran
- * on, expiry closes included: Expected IRR throws without them rather than settle expired
- * options at the assumed level.
+ * on, expiry closes included: Current IRR throws without them rather than settle expired options
+ * at today's spot. Expected IRR and Expected Difference are the unwind on screen, at the page's
+ * Spot Level. Current IRR and Exit Value are the same unwind at today's desk spot: when the page
+ * is at that spot it is the unwind on screen, otherwise expectedIrrAtLevel reprices it there with
+ * only the option spot moved.
  */
-export function activeManagementFigures(args: {
+function activeManagementFigures(args: {
   product: ProductMaster;
   surface: VolSurface;
   inputs: UnwindInputs;
   result: UnwindResult;
   actualTarget: number | null;
   actualTargetSource: string | null;
-  /** Desk assumed levels; null means the underlying spot level. */
-  assumedLevels: { nifty: number | null; sensex: number | null };
+  /** Today's desk spots (useMultiQuotes().deskLevels). */
+  deskLevels: { nifty: number | null; sensex: number | null };
 }): ActiveManagementFigures {
   const { product, surface, inputs, result } = args;
   const underlying = underlyingOf(product, inputs);
-  const assumed = underlying === "Sensex" ? args.assumedLevels.sensex : args.assumedLevels.nifty;
-  const assumedLevelSet = assumed != null && assumed > 0;
-  const assumedLevel = assumedLevelSet ? assumed : (deskPricingSpot({ ...inputs, underlying }) ?? inputs.spot);
-  const expected = expectedIrrAtLevel({ product, surface, inputs, level: assumedLevel });
+  const expectedLevel = deskPricingSpot({ ...inputs, underlying }) ?? inputs.spot;
+  const desk = underlying === "Sensex" ? args.deskLevels.sensex : args.deskLevels.nifty;
+  const currentLevel = desk != null && desk > 0 ? desk : null;
+  const expected = irrSet(result, product);
+  // Half a paisa, the tolerance the desk uses to call a typed level the desk spot.
+  const currentIsExpected = currentLevel != null && Math.abs(currentLevel - expectedLevel) < 0.005;
+  const current =
+    currentLevel == null || currentIsExpected
+      ? null
+      : expectedIrrAtLevel({ product, surface, inputs, level: currentLevel });
   const facts = observationFacts(product, inputs.unwindDate, inputs.expirySpots);
   return {
-    underlying,
     actualTarget: args.actualTarget,
     actualTargetSource: args.actualTargetSource,
     effectiveTarget: residualTarget(args.actualTarget, facts),
     facts,
-    irr: irrSet(result, product),
-    assumedLevel,
-    assumedLevelSet,
-    expectedIrr: expected.expectedIrr,
-    expectedFlags: expected.irr.flags,
+    currentLevel,
+    expectedLevel,
+    currentIrr: currentLevel == null ? null : current ? current.expectedIrr : expected.currentIrr,
+    currentFlags: currentLevel == null ? null : current ? current.irr.flags : expected.flags,
+    expectedIrr: expected.currentIrr,
+    expectedFlags: expected.flags,
+    currentIsExpected,
+    expectedDifferenceRs: expectedDifferenceAtMaturity(product, result, surface),
+    exitValueRs: currentLevel == null ? null : current ? current.exitValueRs : bookValue(product, result).exitValueRs,
   };
 }
 
@@ -168,22 +200,30 @@ function activeManagementWarnings(f: ActiveManagementFigures): string[] {
       `The observation on ${dates(today)} is today. Its index close is provisional until the market closes, so check it again after the close.`,
     );
   }
-  if (f.irr.flags.noCap) {
+  if (f.expectedFlags.noCap) {
     out.push(
-      "The coupon or the tenor is 0, so there is no cap. Product Internal Rate of Return shows - and Current Internal Rate of Return is not capped.",
+      "The coupon or the tenor is 0, so there is no cap, and Current and Expected Internal Rates of Return are not capped.",
     );
   }
-  if (f.irr.flags.noInvestedTenor) {
-    out.push(
-      "The unwinding date is on or before the allotment date. Client Internal Rate of Return is 0.00% by rule, and Current Internal Rate of Return and Expected Internal Rate of Return at Assumed Level show -.",
-    );
-  } else if (f.irr.flags.nonPositiveQuote) {
-    out.push(
-      "The unwind quote is zero or below. Client Internal Rate of Return is 0.00% by rule, and Current Internal Rate of Return shows -.",
-    );
+  if (f.currentLevel == null) {
+    out.push("Today's index level is not known yet, so Current Internal Rate of Return, Exit Value and Current Level show -.");
   }
-  if (!f.irr.flags.noInvestedTenor && f.expectedFlags.nonPositiveQuote) {
-    out.push("At the assumed level the unwind quote is zero or below, so Expected Internal Rate of Return at Assumed Level shows -.");
+  if (f.expectedFlags.noInvestedTenor) {
+    out.push(
+      "The unwinding date is on or before the allotment date. Client Internal Rate of Return is 0.00% by rule, and Current and Expected Internal Rates of Return show -.",
+    );
+    return out;
+  }
+  // The rates are on the book quote, Exit Value per debenture, not on the headline Unwind Quote.
+  const currentNonPositive = f.currentFlags?.nonPositiveQuote === true;
+  if (f.expectedFlags.nonPositiveQuote && (f.currentIsExpected || currentNonPositive)) {
+    out.push(
+      "Exit Value per debenture is zero or below, so Current and Expected Internal Rates of Return show -.",
+    );
+  } else if (f.expectedFlags.nonPositiveQuote) {
+    out.push("At the Expected Level, Exit Value per debenture is zero or below, so Expected Internal Rate of Return shows -.");
+  } else if (currentNonPositive) {
+    out.push("At the Current Level, Exit Value per debenture is zero or below, so Current Internal Rate of Return shows -.");
   }
   return out;
 }
@@ -196,7 +236,7 @@ type ActiveManagementView = {
   schedule: AmTable;
 };
 
-export function activeManagementView(f: ActiveManagementFigures): ActiveManagementView {
+function activeManagementView(f: ActiveManagementFigures): ActiveManagementView {
   return {
     targets: [
       levelValue("Actual Target", f.actualTarget),
@@ -207,6 +247,10 @@ export function activeManagementView(f: ActiveManagementFigures): ActiveManageme
       countValue("Observations Total", f.facts.total),
       countValue("Observations Passed", f.facts.passed),
       countValue("Observations Left", f.facts.left),
+      textValue(
+        "Pending Observations",
+        pendingObservationsText(f.facts.points.filter((p) => !p.passed).map((p) => p.date)),
+      ),
       dateValue("Observation Start Date", f.facts.startDate),
       dateValue("Observation End Date", f.facts.endDate),
       dateValue("Next Observation Date", f.facts.nextDate),
@@ -214,20 +258,19 @@ export function activeManagementView(f: ActiveManagementFigures): ActiveManageme
       textValue("Observation Status", f.facts.status),
     ],
     returns: [
-      pctValue("Product Internal Rate of Return", f.irr.maxIrr),
-      pctValue("Client Internal Rate of Return", f.irr.clientIRR),
-      pctValue("Residual Internal Rate of Return", f.irr.residualIRR),
-      pctValue("Current Internal Rate of Return", f.irr.currentIrr),
-      pctValue("Expected Internal Rate of Return at Assumed Level", f.expectedIrr),
-      levelValue("Assumed Level", f.assumedLevel),
-      textValue("Assumed Level Source", f.assumedLevelSet ? `Assumed ${f.underlying} Level` : "Underlying Spot Level"),
+      pctValue("Current Internal Rate of Return", f.currentIrr),
+      pctValue("Expected Internal Rate of Return", f.expectedIrr),
+      rupeeValue("Expected Difference", f.expectedDifferenceRs),
+      rupeeValue("Exit Value", f.exitValueRs),
+      levelValue("Current Level", f.currentLevel),
+      levelValue("Expected Level", f.expectedLevel),
     ],
     warnings: activeManagementWarnings(f),
     schedule: observationScheduleTable(f.facts),
   };
 }
 
-export function activeManagementExportDoc(view: ActiveManagementView): AmExportDoc {
+function activeManagementExportDoc(view: ActiveManagementView): AmExportDoc {
   return {
     screen: "Active-Management",
     title: "Active Management",
@@ -246,9 +289,21 @@ export function activeManagementExportDoc(view: ActiveManagementView): AmExportD
   };
 }
 
-/* ── Black Scholes Pricer ──────────────────────────────────────────────── */
+/** The Active Management tab for the unwind on screen: its panels and its download. */
+export function activeManagementTab(
+  args: Parameters<typeof activeManagementFigures>[0],
+): { view: ActiveManagementView; doc: AmExportDoc } {
+  const view = activeManagementView(activeManagementFigures(args));
+  return { view, doc: activeManagementExportDoc(view) };
+}
 
-/** The Pricer Table's 14 columns, then the Options Book cash for the same leg. */
+/* ── Pricer Table ──────────────────────────────────────────────────────── */
+
+/**
+ * The Pricer Table's 14 columns, then the Options Book cash for the same leg. Bid Offer Spread is
+ * the z each leg was priced with (Sell at σ − z/2, Buy at σ + z/2): the flat spread typed on the
+ * page, or 2 × the Bid Ask table's s for that leg's expiry when the input is blank.
+ */
 const PRODUCT_PRICER_HEADERS = [
   ...PRICER_TABLE_HEADERS,
   "Original Buy or Sell",
@@ -259,7 +314,7 @@ const PRODUCT_PRICER_HEADERS = [
   "Settlement Fixing",
 ] as const;
 
-export function productPricerTableView(rows: ProductPricerRow[]): AmTable {
+function productPricerTableView(rows: ProductPricerRow[]): AmTable {
   const pricerText = pricerTableRowsFlat(rows);
   const pricerExcel = pricerTableExcelRows(rows);
   return {
@@ -289,16 +344,27 @@ export function productPricerTableView(rows: ProductPricerRow[]): AmTable {
   };
 }
 
-export function productPricerExportDoc(table: AmTable, result: UnwindResult): AmExportDoc {
+function productPricerExportDoc(table: AmTable, result: UnwindResult): AmExportDoc {
   return {
-    screen: "Black-Scholes-Pricer",
-    title: "Black Scholes Pricer",
-    sheetName: "Black Scholes Pricer",
+    screen: "Pricer-Table",
+    title: "Pricer Table",
+    sheetName: "Pricer Table",
     orientation: "landscape",
     subtitle: `${table.text.length} Legs · Unwinding Date ${formatDeskDate(result.unwindDate)}`,
     inputs: false,
     sections: [{ title: "Black Scholes Marks And Options Book Cash", table }],
   };
+}
+
+/** The Pricer Table tab for the unwind on screen: its table and its download. */
+export function productPricerTab(basis: {
+  product: ProductMaster;
+  surface: VolSurface;
+  inputs: UnwindInputs;
+  result: UnwindResult;
+}): { table: AmTable; doc: AmExportDoc } {
+  const table = productPricerTableView(productPricerTable(basis));
+  return { table, doc: productPricerExportDoc(table, basis.result) };
 }
 
 /* ── Scenario Grid ─────────────────────────────────────────────────────── */
@@ -321,15 +387,13 @@ const SCENARIO_GRID_HEADERS = [
   "Change In Premium Outflow",
   "Unwind Value",
   "Change In Unwind Value",
-  "Client Internal Rate of Return",
-  "Change In Client Internal Rate of Return",
   "Current Internal Rate of Return",
   "Change In Current Internal Rate of Return",
-  "Residual Internal Rate of Return",
-  "Change In Residual Internal Rate of Return",
+  "Expected Difference",
+  "Change In Expected Difference",
 ] as const;
 
-export function scenarioGridTable(grid: ScenarioGrid): AmTable {
+function scenarioGridTable(grid: ScenarioGrid): AmTable {
   const rupees = formatDeskRupees;
   return {
     headers: [...SCENARIO_GRID_HEADERS],
@@ -345,10 +409,8 @@ export function scenarioGridTable(grid: ScenarioGrid): AmTable {
       RUPEES_FMT,
       PERCENT_FMT,
       PERCENT_FMT,
-      PERCENT_FMT,
-      PERCENT_FMT,
-      PERCENT_FMT,
-      PERCENT_FMT,
+      RUPEES_FMT,
+      RUPEES_FMT,
     ],
     text: grid.cells.map((c) => [
       level(c.level),
@@ -360,12 +422,10 @@ export function scenarioGridTable(grid: ScenarioGrid): AmTable {
       rupees(c.change.premiumOutflowRs),
       rupees(c.unwindValueRs),
       rupees(c.change.unwindValueRs),
-      formatPct(c.irr.clientIRR),
-      formatPct(c.change.clientIRR),
       formatPct(c.irr.currentIrr),
       formatPct(c.change.currentIrr),
-      formatPct(c.irr.residualIRR),
-      formatPct(c.change.residualIRR),
+      rupees(c.expectedDifferenceRs),
+      rupees(c.change.expectedDifferenceRs),
     ]),
     excel: grid.cells.map((c) => [
       c.level,
@@ -377,19 +437,23 @@ export function scenarioGridTable(grid: ScenarioGrid): AmTable {
       c.change.premiumOutflowRs,
       c.unwindValueRs,
       c.change.unwindValueRs,
-      c.irr.clientIRR,
-      c.change.clientIRR,
       num(c.irr.currentIrr),
       num(c.change.currentIrr),
-      c.irr.residualIRR,
-      c.change.residualIRR,
+      num(c.expectedDifferenceRs),
+      num(c.change.expectedDifferenceRs),
     ]),
     mergeCols: [],
     highlightRow: grid.cells.findIndex((c) => c.k === 0),
   };
 }
 
-export function scenarioGridExportDoc(grid: ScenarioGrid, table: AmTable): AmExportDoc {
+/** The Scenario Grid tab for a priced grid: its table and its download. */
+export function scenarioGridTab(grid: ScenarioGrid): { table: AmTable; doc: AmExportDoc } {
+  const table = scenarioGridTable(grid);
+  return { table, doc: scenarioGridExportDoc(grid, table) };
+}
+
+function scenarioGridExportDoc(grid: ScenarioGrid, table: AmTable): AmExportDoc {
   const basis = `${grid.underlying} Base Level ${level(grid.baseSpot)} · Steps Of ${formatNumber(grid.step, 0)} Index Points · Unwinding Date ${formatDeskDate(grid.unwindDate)}`;
   const note = scenarioFlatNote(grid);
   return {

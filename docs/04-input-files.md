@@ -8,8 +8,8 @@ Sample builder: `npm run build:samples` → `scripts/build-sample-inputs.ts`.
 
 ## 1. Volatility Surface Input (monthly)
 
-**Sample path:** `public/samples/Vol_Surface_Input_October.xlsx` (current desk month;
-`monthKey` `2026-10`)
+**Sample path:** `public/samples/Vol_Surface_Input_November.xlsx` (current desk month;
+`monthKey` `2026-11`)
 
 ### Sheet 1 — Vol Surface
 
@@ -18,14 +18,14 @@ MarketData grid used for bilinear interpolation ([doc 03](03-pricer-logic.md)).
 | Axis | Contents |
 |------|----------|
 | Column labels, row 1 | Strike Change: Deep · ₹500, then percent columns (sample 55% through 150%) |
-| Row 2 | **Nifty Strikes** — Deep ₹500, then live Excel formulas `Surface Parameters!$B$8` × moneyness (seed Reference Nifty **22,421.95**) |
-| Row 3 | **Sensex Strikes** — Deep ₹500, then live Excel formulas `Surface Parameters!$B$9` × moneyness (seed Reference Sensex **71,909.70**) |
+| Row 2 | **Nifty Strikes** — Deep ₹500, then live Excel formulas `Surface Parameters!$B$8` × moneyness (seed Reference Nifty **23,053.10**) |
+| Row 3 | **Sensex Strikes** — Deep ₹500, then live Excel formulas `Surface Parameters!$B$9` × moneyness (seed Reference Sensex **74,459.53**) |
 | Row labels | Corner cell **Expiry Date**, then one date per expiry |
 | Body | Implied volatility in **percent points**, two decimals (57.36 means 57.36%) |
 
 Expiry count and strike-percent columns may change. Every other label, sheet order and
-Deep column must match the sample. The October 2026 seed / sample has **14** live
-expiries (27-Oct-2026 → 26-Mar-2031) and **20** percent columns plus Deep. Deep · ₹500 carries
+Deep column must match the sample. The November 2026 seed / sample has **14** live
+expiries (23-Nov-2026 → 26-Mar-2031) and **20** percent columns plus Deep. Deep · ₹500 carries
 the same vols as the 55% column.
 
 Absolute strike prices are **not** stored as the interpolation axis. Deep is always ₹500 for Nifty or Sensex. Every
@@ -48,9 +48,9 @@ other dates. No text in brackets.
 
 | Parameter | Seeded value | Notes |
 |-----------|--------------|-------|
-| Month | October 2026 (`monthKey` `2026-10`) | Roll anchors at the start of each calendar month |
-| Reference Nifty Price | 22,421.95 | Cell **B8**; 100% Strike Change Nifty anchor as of **1 Oct 2026**; Nifty strike row formulas × moneyness |
-| Reference Sensex Price | 71,909.70 | Cell **B9**; 100% Strike Change Sensex anchor as of **1 Oct 2026**; Sensex strike row formulas × moneyness |
+| Month | November 2026 (`monthKey` `2026-11`) | Roll anchors at the start of each calendar month |
+| Reference Nifty Price | 23,053.10 | Cell **B8**; 100% Strike Change Nifty anchor as of **1 Nov 2026** (the 30 Oct close); Nifty strike row formulas × moneyness |
+| Reference Sensex Price | 74,459.53 | Cell **B9**; 100% Strike Change Sensex anchor as of **1 Nov 2026** (the 30 Oct close); Sensex strike row formulas × moneyness |
 | Volatility Bump | 0.00% | Added to interpolated vol |
 | Forward Sell Rate | 6.60% | Flat for the month; Pricer Discount Yield is this plus 1% |
 
@@ -331,7 +331,7 @@ Three layers — do not expect byte-identical Excel files:
 | Layer | What it is | Logic |
 |-------|------------|-------|
 | **Reference XLSM** (eight FY21–FY27 Downloads masters, Nifty + Sensex) | Native desk calculators with Main Master File, MarketData strikes, Calculator sheet | Source of product facts + option legs. Collate (`npm run collate:multi`) keeps **unique Product Codes** only (richer leg book on collisions; blank/zero qty dropped). A repeated option row stays when its price, spread, or quantity differs. An exact clone drops. While one product name continues, the code stays the code on the first row of that name. Blank Buy/Sell trusts already-signed Req. Quantity (negative → Sell). Locked **2,505 / 79,190**; all eight files ⊆ seed. Derived Unwind Quote / Grown Value / deltas on those sheets are **not** authoritative for the web desk — Excel often freezes strike rows / uses different spot rules. Live option marks on the web desk always come from `priceLeg` (Pricer). **Premium Credited is always positive** on the desk: the absolute value of Product Price times negative Required Quantity, summed over the live legs. |
-| **Web desk** | Mongo / seed book + live Yahoo spots + October surface | Same `computeUnwind` / Black–Scholes for Single and Multi. Product Book / Unwinding / Pricer only list **Maturity Date ≥ as-of**. Desk Book adds an **Expired** tab for past-maturity products. Live observation tabs further split by remaining option expiries. **Pricer** matches Excel IFERROR → 0 after expiry. An expired Options Book price is the in-the-money amount for both Unwind Buy and Unwind Sell. A sold option pays it. A bought option receives it as a positive inflow. Net Premium Outflow is the sum of the leg amounts. Out-of-the-money expired options stay 0. |
+| **Web desk** | Mongo / seed book + live Yahoo spots + November surface | Same `computeUnwind` / Black–Scholes for Single and Multi. Product Book / Unwinding / Pricer only list **Maturity Date ≥ as-of**. Desk Book adds an **Expired** tab for past-maturity products. Live observation tabs further split by remaining option expiries. **Pricer** matches Excel IFERROR → 0 after expiry. An expired Options Book price is the in-the-money amount for both Unwind Buy and Unwind Sell. A sold option pays it. A bought option receives it as a positive inflow. Net Premium Outflow is the sum of the leg amounts. Out-of-the-money expired options stay 0. |
 | **Download Excel** (Product Book, Unwinding Summary + Options Book, Pricer Table) | Styled maroon/gold exports of **what is on screen** | Columns locked in `lib/workbook/export-columns.ts`. Dynamic column widths, **no cell indent**. Master fields map through; Unwind Quote Amount and IRRs are engine output. Options Book / Pricer marks match the screen tables (`₹`, blank `-`), including counted expired intrinsic on the Options Book and NBFC cards. A sold option pays it. A bought option receives it. Pricer expired prices stay 0. |
 
 Product Book download column map (master vs engine) is `PRODUCT_BOOK_SOURCE_MAP` in `export-columns.ts`. The sheet is one row per option leg: Premium Outflow after Client Internal Rate of Return, then the five Options Book money columns. Option Expiry Dates are the New Primary Observation Average 1–7 dates (series + name + rollover phase). Verify with `npm run verify:downloads`.

@@ -13,7 +13,7 @@ import { productKey } from "../lib/multi/product-key";
 import type { ProductMaster, VolSurface } from "../lib/types";
 import { DESK_MASTER_HEADERS, PRODUCT_MASTER_HEADERS } from "../lib/workbook/master-columns";
 
-const BASE = "http://localhost:3006";
+const BASE = process.env.DESK_BASE_URL ?? "http://localhost:3006";
 const YESTERDAY = "2026-08-17";
 const YESTERDAY_NIFTY = 24366;
 
@@ -110,7 +110,6 @@ async function main() {
   const pages = [
     "/",
     "/portfolio/unwinding",
-    "/portfolio/pricer",
     "/intelligence",
     "/upload",
   ];

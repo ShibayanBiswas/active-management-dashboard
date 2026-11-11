@@ -24,8 +24,7 @@ path })` (`lib/embed-navigation.ts`, `components/layout/embed-navigation.tsx`).
 | Area | Route | Nav label | Notes |
 |------|-------|-----------|-------|
 | Home | `/` | Home | Product Book, Post Observation Analytics, Desk Snapshot (four cards), Desk Modules, Desk Book, sample downloads |
-| Unwinding Calculator | `/portfolio/unwinding` | Portfolio → Unwinding Calculator | Quote, facts, funding, whole book, options |
-| Pricer Table | `/portfolio/pricer` | Portfolio → Pricer Table | 14-column Black–Scholes book, no Option Code |
+| Unwinding Calculator | `/portfolio/unwinding` | Portfolio → Unwinding Calculator | Quote, facts, funding, whole book, options, then Active Management, Pricer Table and Scenario Grid |
 | Logic Atlas | `/intelligence` | Intelligence | Pipelines and primitives only — Desk Book explorer stays on Home |
 | Upload | `/upload` | Upload | Open dropzones, no login |
 
@@ -257,7 +256,8 @@ of the Options Book header row (title left, button flush right; no wrap under th
 
 ## Pricer Table
 
-Route `/portfolio/pricer`. Same input panel as the Unwinding Calculator, including the
+A tab on the Unwinding Calculator (`/portfolio/unwinding?tab=pricer`); the separate Pricer page
+was removed. It uses the Unwinding Calculator's input panel, including the
 selected **Underlying**. Nifty or Sensex chosen on Unwinding is the Pricer default (shared
 desk inputs, kept in session storage). While the book computes, the panel shows a
 serif title and a thin gold rule — no spinner. Reveal, then the **14-column** table

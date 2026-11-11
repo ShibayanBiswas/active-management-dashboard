@@ -253,6 +253,7 @@ const MODULES: LogicModule[] = [
     insights: [
       "The pricer discounts at the Forward Sell Rate plus one percent.",
       "Sell Price prices at volatility minus half the Bid Ask Spread; Buy Price prices at volatility plus half the spread.",
+      "A blank Bid Ask Spread uses the Bid Ask table: each leg's expiry sets a spread s, from 0.75% through March 2027 down to 0.075% after March 2030, and Sell prices at volatility minus s, Buy at volatility plus s.",
       "Delta is a finite difference of one index point around the spot.",
       "An expired Sell put uses put intrinsic on the Options Book; that cash enters Premium Outflow / Unwind Value / quote. Pricer stays 0 after expiry.",
     ],
@@ -301,7 +302,7 @@ const MODULES: LogicModule[] = [
     kicker: "Rates",
     title: "Three rates of return",
     purpose:
-      "Product rate is the coupon over the full life. Client rate is what the unwind quote has earned so far. Residual rate is what is left until maturity.",
+      "Product rate is the coupon over the full life. Client rate is what the unwind quote has earned so far. Residual rate is what is left until maturity. Client and Residual rates are shown no higher than the Product rate.",
     tone: "rose",
     metrics: [
       { label: "Rates", value: "3" },
@@ -428,41 +429,42 @@ const MODULES: LogicModule[] = [
     kicker: "Active Management",
     title: "Current and expected rates",
     purpose:
-      "Current rate is the client rate capped at the product rate. Expected rate runs the whole unwind again at an assumed index level and caps it the same way.",
+      "Current rate is the rate earned on the book quote, Exit Value per debenture, capped at the product rate, at today's index level. Expected rate runs the whole unwind again at the Spot Level typed on the Unwinding Calculator and works it out the same way.",
     tone: "teal",
     metrics: [
       { label: "Rates", value: "2" },
       { label: "Cap", value: "Product rate" },
-      { label: "Needs", value: "Assumed level" },
+      { label: "Needs", value: "Spot Level" },
     ],
     insights: [
       "The cap is the product rate: Face Value grown at the coupon over the full life.",
-      "A product with a zero coupon has no cap, so its Current rate is its Client rate.",
-      "Expected rate reprices every live option at the assumed level. Expired options keep the closes they settled at.",
-      "With no assumed level entered, the desk spot is used and Expected rate equals Current rate.",
-      "A quote at or below zero, or an unwind on the allotment date, shows a dash rather than a zero rate.",
+      "A product with a zero coupon has no cap, so its Current rate is not capped.",
+      "Expected rate reprices every live option at the Spot Level. Expired options keep the closes they settled at.",
+      "With the Spot Level at today's level, Expected rate equals Current rate.",
+      "Exit Value is the Unwind Value at today's level plus interest on settled option cash from each expiry. Expected Difference grows the book to maturity at the Spot Level and takes off the payout.",
+      "A book quote at or below zero, or an unwind on the allotment date, shows a dash rather than a zero rate.",
     ],
     outputs: ["Current Internal Rate of Return", "Expected Internal Rate of Return"],
     pipeline: [
       {
         id: "amr-in",
         kind: "input",
-        label: "Quote and coupon",
+        label: "Book quote and coupon",
         description:
-          "The Unwind Quote Amount and Client rate from the live unwind, with the coupon and full life of the product.",
+          "Exit Value per debenture from the live unwind, with the coupon and full life of the product.",
       },
       {
         id: "amr-cur",
         kind: "process",
         label: "Current rate",
-        description: "The lower of the Client rate and the Product rate.",
+        description: "The rate from Face Value to the book quote over the days invested, capped at the Product rate.",
       },
       {
         id: "amr-level",
         kind: "input",
-        label: "Assumed level",
+        label: "Expected level",
         description:
-          "Assumed Nifty Level and Assumed Sensex Level on Home. A blank level uses the desk spot.",
+          "The Nifty or Sensex Spot Level on the Unwinding Calculator. Left at today's level, it is the desk spot.",
       },
       {
         id: "amr-eng",
@@ -475,7 +477,7 @@ const MODULES: LogicModule[] = [
         id: "amr-out",
         kind: "output",
         label: "Expected rate",
-        description: "The Client rate at the assumed level, capped at the Product rate.",
+        description: "The same rate on the book quote at the expected level, capped at the Product rate.",
       },
     ],
   },
@@ -502,9 +504,8 @@ const MODULES: LogicModule[] = [
       "Unwind Quote",
       "Premium Outflow",
       "Unwind Value",
-      "Client Internal Rate of Return",
       "Current Internal Rate of Return",
-      "Residual Internal Rate of Return",
+      "Expected Difference",
     ],
     pipeline: [
       {
@@ -536,7 +537,7 @@ const MODULES: LogicModule[] = [
         kind: "output",
         label: "Scenario grid",
         description:
-          "Unwind Quote, Premium Outflow, Unwind Value and the rates at every level, each with its change.",
+          "Unwind Quote, Premium Outflow, Unwind Value, Current rate and Expected Difference at every level, each with its change.",
       },
     ],
   },
@@ -580,7 +581,7 @@ const MODULES: LogicModule[] = [
         kind: "process",
         label: "Check the file",
         description:
-          "Headers are checked so the wrong sheet cannot replace the live book. A good upload replaces the book on Home and both calculators.",
+          "Headers are checked so the wrong sheet cannot replace the live book. A good upload replaces the book on Home and the Unwinding Calculator.",
       },
       {
         id: "in-db",
@@ -594,7 +595,7 @@ const MODULES: LogicModule[] = [
         kind: "output",
         label: "Live desk",
         description:
-          "Unwinding Calculator and Pricer Table read the saved desk on the next run. The product table stays on Home.",
+          "The Unwinding Calculator and its Pricer Table tab read the saved desk on the next run. The product table stays on Home.",
       },
     ],
   },
@@ -667,7 +668,7 @@ const PRIMITIVES: Array<{ name: string; category: string; uses: "leg" | number; 
 const DESK_LINKS = [
   { href: "/", label: "Home" },
   { href: "/portfolio/unwinding", label: "Unwinding Calculator" },
-  { href: "/portfolio/pricer", label: "Pricer Table" },
+  { href: "/portfolio/unwinding?tab=pricer", label: "Pricer Table" },
   { href: "/upload", label: "Upload Files" },
 ];
 
@@ -683,15 +684,16 @@ const LANES = [
   {
     title: "Pricer Table",
     accent: "#0ea5e9",
-    dataLane: "The vol surface, the month's vol bump, the Forward Sell Rate, and the bid-ask spread.",
+    dataLane:
+      "A tab on the Unwinding Calculator for the selected product: the vol surface, the month's vol bump, the Forward Sell Rate, and the bid-ask spread.",
     valuationPath: "Each option is priced on the forward. Discount is the Forward Sell Rate plus one percent.",
-    payoffPath: "Mid, sell, and buy prices, plus delta, for every strike and expiry.",
+    payoffPath: "Mid, sell, and buy prices, plus delta, for every strike and expiry, beside the Options Book cash for the same leg.",
     signals: ["Volatility", "Forward", "Discount", "Delta"],
   },
   {
     title: "Active Management",
     accent: "#4f46e5",
-    dataLane: "Observation dates, index closes, the product master's target, and the assumed index levels.",
+    dataLane: "Observation dates, index closes, the product master's target, and the Spot Level on the Unwinding Calculator.",
     valuationPath: "Current and Expected rates from the same unwind, and a twenty-one level scenario grid for each product.",
     payoffPath: "Effective Target is the average the observations still left must print to reach the target.",
     signals: ["Effective Target", "Current rate", "Expected rate", "Scenario grid"],
@@ -701,7 +703,7 @@ const LANES = [
     accent: "#059669",
     dataLane: "The monthly vol surface and the product master. An upload replaces the live desk.",
     valuationPath: "The new files become the live desk and are saved.",
-    payoffPath: "Home, Unwinding Calculator, and Pricer Table read that desk on the next run.",
+    payoffPath: "Home and the Unwinding Calculator, with its Pricer Table tab, read that desk on the next run.",
     signals: ["Surface month", "Option legs", "Product price", "Desk book"],
   },
 ];

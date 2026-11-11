@@ -86,7 +86,8 @@ export function computeUnwind(args: {
       : underlyingFromProductName(product.productName, product.productCode);
   const spot = deskPricingSpot({ ...inputs, underlying }) ?? inputs.spot;
   const dens = inputs.debentures;
-  const bidAskSpread = inputs.bidAskSpread ?? 0;
+  // null or undefined: each leg takes its Bid Ask table spread in priceLeg.
+  const bidAskSpread = inputs.bidAskSpread ?? null;
   const unwindDate = parseISODate(inputs.unwindDate);
   const allotment = parseISODate(product.allotmentDate);
   const face = product.faceValue;
@@ -188,18 +189,21 @@ export function computeUnwind(args: {
         : null;
 
     // Headline Current Premium Outflow: live mids plus expired intrinsic on both sides.
+    // The side gives the sign, so Number of Spreads counts as a size: a sold leg stored with
+    // negative spreads would otherwise be negated twice.
+    const spreadSize = Math.abs(leg.spreads);
     const showPrice = expired || mid > PRICE_BLANK_EPS;
     const currentPrice = intrinsic != null && intrinsic > 0 ? intrinsic : showPrice ? mid : null;
     let premiumCell: number | null = null;
     if (!expired && showPrice && mid > PRICE_BLANK_EPS) {
       const count = groupCounts.get(groupKey(String(leg.optionType), leg.strike, leg.spreads)) ?? 1;
-      const signed = unwind.toLowerCase() === "sell" ? mid * leg.spreads : -mid * leg.spreads;
+      const signed = unwind.toLowerCase() === "sell" ? mid * spreadSize : -mid * spreadSize;
       premiumCell = signed / count;
     } else if (intrinsic != null && intrinsic > 0) {
       const count = groupCounts.get(groupKey(String(leg.optionType), leg.strike, leg.spreads)) ?? 1;
       // Original Sell pays. Original Buy receives.
       const signed = original.trim().toLowerCase() === "sell" ? -intrinsic : intrinsic;
-      premiumCell = (signed * leg.spreads) / count;
+      premiumCell = (signed * spreadSize) / count;
     } else if (showPrice && expired) {
       premiumCell = 0;
     }

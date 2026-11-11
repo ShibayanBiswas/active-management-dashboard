@@ -18,13 +18,13 @@ const msg = (origin: string, data: unknown, source: unknown = parent) => ({
 });
 const nav = (path: string) => ({ type: "active-management:navigate", path });
 
-for (const path of ["/", "/portfolio/unwinding", "/portfolio/pricer", "/intelligence", "/upload"]) {
+for (const path of ["/", "/portfolio/unwinding", "/intelligence", "/upload"]) {
   const target = embedNavigationTarget(msg(WORKSTATION, nav(path)), parent, true);
   assert(`Workstation opens ${path}`, target === path, String(target));
 }
 
-const local = msg("http://localhost:3000", nav("/portfolio/pricer"));
-assert("local Workstation accepted outside production", embedNavigationTarget(local, parent, false) === "/portfolio/pricer");
+const local = msg("http://localhost:3000", nav("/portfolio/unwinding"));
+assert("local Workstation accepted outside production", embedNavigationTarget(local, parent, false) === "/portfolio/unwinding");
 assert("local Workstation rejected in production", embedNavigationTarget(local, parent, true) === null);
 
 const ok = nav("/portfolio/unwinding");
@@ -34,7 +34,7 @@ assert(
   "other message type rejected",
   embedNavigationTarget(msg(WORKSTATION, { ...ok, type: "hedging-sheet:navigate" }), parent, true) === null,
 );
-for (const path of ["/multi", "/multi/portfolio/unwinding", "/api/multi/dataset", "/portfolio"]) {
+for (const path of ["/multi", "/multi/portfolio/unwinding", "/api/multi/dataset", "/portfolio", "/portfolio/pricer"]) {
   assert(`path ${path} rejected`, embedNavigationTarget(msg(WORKSTATION, nav(path)), parent, true) === null);
 }
 assert("non-object data rejected", embedNavigationTarget(msg(WORKSTATION, "nope"), parent, true) === null);

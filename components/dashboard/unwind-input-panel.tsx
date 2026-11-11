@@ -236,13 +236,19 @@ export function UnwindInputPanel({ onCompute }: { onCompute?: () => void }) {
           />
         </FieldRow>
         <FieldRow label="Bid Ask Spread">
+          {/* Blank prices each leg at its Bid Ask table spread; a typed percent is one flat spread. */}
           <Input
             type="number"
             step="0.05"
             min={0}
             suffix="%"
-            value={(inputs.bidAskSpread ?? 0) * 100}
-            onChange={(e) => setInputs({ bidAskSpread: (Number(e.target.value) || 0) / 100 })}
+            placeholder="As Per Bid Ask Table"
+            value={inputs.bidAskSpread == null ? "" : inputs.bidAskSpread * 100}
+            onChange={(e) =>
+              setInputs({
+                bidAskSpread: e.target.value.trim() === "" ? null : (Number(e.target.value) || 0) / 100,
+              })
+            }
           />
         </FieldRow>
         <FieldRow label="Nifty Spot Level">

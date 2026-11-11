@@ -99,7 +99,7 @@ async function productWithBlankFacts(headers: string[]): Promise<ArrayBuffer> {
 }
 
 async function maybeE2e(volBuf: ArrayBuffer, productBuf: ArrayBuffer) {
-  const base = "http://localhost:3006";
+  const base = process.env.DESK_BASE_URL ?? "http://localhost:3006";
   try {
     const ping = await fetch(`${base}/api/multi/dataset`);
     if (!ping.ok) {
@@ -236,7 +236,6 @@ async function maybeE2e(volBuf: ArrayBuffer, productBuf: ArrayBuffer) {
       "/",
       "/upload",
       "/portfolio/unwinding",
-      "/portfolio/pricer",
       "/intelligence",
     ].map(async (p) => {
       const res = await fetch(`${base}${p}`);

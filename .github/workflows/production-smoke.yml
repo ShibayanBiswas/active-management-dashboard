@@ -33,7 +33,7 @@ jobs:
         run: sleep 90
       - name: Every desk route answers 200
         run: |
-          for path in / /portfolio/unwinding /portfolio/pricer /intelligence /upload; do
+          for path in / /portfolio/unwinding /intelligence /upload; do
             code=$(curl -s -o /dev/null -w '%{http_code}' --retry 3 "$BASE_URL$path")
             echo "$path $code"
             test "$code" = "200"

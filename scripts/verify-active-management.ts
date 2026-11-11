@@ -1,15 +1,21 @@
 /**
  * Active Management add-ons on the seeded live book, offline: the design test plan (observation facts,
  * Residual Target parity, Max IRR, the scenario ladder, expired legs, Sensex shift, missing closes,
- * Pricer alignment, flat ladders), the Actual Target seed and the Product Book composer.
- * As-of, desk spots and expiry closes are fixed, so nothing reaches Yahoo or Mongo. Exits non-zero on any failure.
+ * Pricer alignment, flat ladders), the Actual Target seed, the Product Book composer, the Bid Ask
+ * table, Expected Difference at Maturity, Pending Observations, scenario Expected Difference and the
+ * book scenario rows. As-of, desk spots and expiry closes are fixed, so nothing reaches Yahoo or
+ * Mongo. Exits non-zero on any failure.
  */
 import multiSeed from "../lib/data/multi-products-seed.json";
 import targetSeed from "../lib/data/am-targets-seed.json";
 import volSeed from "../lib/data/vol-surface-seed.json";
+import { BID_ASK_BUCKETS, bidAskSpreadPercent, bidAskTableRows } from "../lib/active-management/bid-ask";
 import { activeManagementQuote } from "../lib/active-management/book-row";
-import { maxIrr } from "../lib/active-management/irr";
-import { observationFacts, productHasProgressTab } from "../lib/active-management/observations";
+import { BOOK_SCENARIO_SHIFTS, bookScenarioRows, productBookInputs } from "../lib/active-management/book-scenario";
+import { bookValue, settledOutflowCarryRs } from "../lib/active-management/book-value";
+import { irrSet, maxIrr } from "../lib/active-management/irr";
+import { expectedDifferenceAtMaturity } from "../lib/active-management/maturity";
+import { observationFacts, pendingObservationsText, productHasProgressTab } from "../lib/active-management/observations";
 import { productPricerTable } from "../lib/active-management/pricer-table";
 import {
   expectedIrrAtLevel,
@@ -20,13 +26,18 @@ import {
 } from "../lib/active-management/scenario";
 import { actualTargetFor } from "../lib/active-management/target-seed";
 import { residualTarget, targetCandidates } from "../lib/active-management/targets";
+import { blackScholesPrice } from "../lib/engine/black-scholes";
 import { collectExpiredLegExpiryDates, legExpiryYmd } from "../lib/engine/expiry-spots";
-import { computeUnwind } from "../lib/engine/unwind";
-import { normalizeVolSurface } from "../lib/engine/vol-surface";
+import { priceLeg, priceProductBook } from "../lib/engine/pricer";
+import { bookPremiumFraction } from "../lib/engine/product-premium";
+import { computeUnwind, rateZeroCoupon } from "../lib/engine/unwind";
+import { normalizeVolSurface, surfaceVolDecimal } from "../lib/engine/vol-surface";
+import { postObservationFigures } from "../lib/multi/post-observation";
 import { issuedCount, productKey, uniqueProductsByIsin } from "../lib/multi/product-key";
 import { observationDatesForProduct, productsWithLiveMaturity, remainingObservationDays } from "../lib/observation-tabs";
-import type { ProductMaster, UnwindInputs, UnwindResult, VolSurface } from "../lib/types";
-import { underlyingFromProductName } from "../lib/utils";
+import type { ProductMaster, UnderlyingIndex, UnwindInputs, UnwindResult, VolSurface } from "../lib/types";
+import { daysBetween, parseISODate, roundDeskMoney, underlyingFromProductName } from "../lib/utils";
+import { quoteViewFromUnwind } from "../lib/workbook/product-book-rows";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail = "") {
@@ -384,7 +395,7 @@ const sample = [
 {
   const am = (p: ProductMaster, expected: ReturnType<typeof expectedIrrAtLevel> | null, fixings?: Record<string, number>, today = AS_OF) => {
     const { inputs, result } = pricedOf(p);
-    return activeManagementQuote({ product: p, asOf: AS_OF, result, fixings: fixings ?? inputs.expirySpots, target: actualTargetFor(p), expected, today });
+    return activeManagementQuote({ product: p, asOf: AS_OF, result, surface, fixings: fixings ?? inputs.expirySpots, target: actualTargetFor(p), expected, today });
   };
   const atLevel = (p: ProductMaster, level: number) => expectedIrrAtLevel({ product: p, surface, inputs: pricedOf(p).inputs, level });
   const deskSpot = (p: ProductMaster) => (pricedOf(p).inputs.underlying === "Sensex" ? SENSEX : NIFTY);
@@ -448,10 +459,11 @@ const sample = [
 
   const has = (warnings: string[], text: string) => warnings.includes(text);
   check("fallback target is flagged", has(am(named("Nifty Accelerator - 671"), null).warnings, "Actual Target From Top Sell Put Strike"));
-  const noCap = am(named("Nifty Magnifier - 829"), null);
+  const p829 = named("Nifty Magnifier - 829");
+  const noCap = am(p829, null);
   check(
     "coupon 0 leaves Max IRR blank and Current IRR uncapped",
-    noCap.maxIrr == null && noCap.currentIrr === pricedOf(named("Nifty Magnifier - 829")).result.clientIRR && has(noCap.warnings, "No Max IRR Cap Because Coupon Or Tenor Is Zero"),
+    noCap.maxIrr == null && noCap.currentIrr === irrSet(pricedOf(p829).result, p829).bookIRR && has(noCap.warnings, "No Max IRR Cap Because Coupon Or Tenor Is Zero"),
   );
   const fixings740 = { ...pricedOf(p740).inputs.expirySpots! };
   delete fixings740["2026-06-30"];
@@ -471,15 +483,17 @@ const sample = [
   const p18 = named("Nifty Maximizer - 18");
   const crash = atLevel(p18, 1000);
   const crashed = am(p18, crash);
+  const crashBook = bookValue(p18, unwindAtLevel({ product: p18, surface, base: pricedOf(p18).inputs, level: 1000 })).bookQuoteRs;
   check(
-    "a non-positive quote at the assumed level blanks Expected IRR",
-    crash.unwindQuoteRs <= 0 && crashed.expectedIrr == null && has(crashed.warnings, "Expected IRR Blank Because Unwind Quote Is Not Positive"),
-    crash.unwindQuoteRs.toFixed(2),
+    "a non-positive book quote at the assumed level blanks Expected IRR",
+    crashBook <= 0 && crash.irr.flags.nonPositiveQuote && crashed.expectedIrr == null && has(crashed.warnings, "Expected IRR Blank Because Book Unwind Quote Is Not Positive"),
+    crashBook.toFixed(2),
   );
   const guarded = activeManagementQuote({
     product: p740,
     asOf: AS_OF,
     result: { ...pricedOf(p740).result, investedTenorDays: 0, clientIRR: 0 },
+    surface,
     fixings: pricedOf(p740).inputs.expirySpots,
     target: actualTargetFor(p740),
     expected: null,
@@ -491,5 +505,396 @@ const sample = [
   );
 }
 
-console.log(failures ? `\n${failures} Active Management checks FAILED` : "\nActive Management checks PASSED");
-if (failures) process.exit(1);
+// Bid Ask table: the workbook's Bid Ask sheet by financial year.
+{
+  // Bid Ask!A2:B60, grouped by spread. Every sheet row gets its own spread back.
+  const sheet: Array<[number, string[]]> = [
+    [0.75, ["2026-01-27", "2026-02-24", "2026-03-30", "2026-04-28", "2026-05-26", "2026-06-30", "2026-07-28", "2026-08-25",
+      "2026-09-29", "2026-10-27", "2026-11-24", "2026-12-29", "2027-01-25", "2027-02-23", "2027-03-30"]],
+    [0.5, ["2027-04-27", "2027-05-25", "2027-06-29", "2027-07-27", "2027-08-31", "2027-09-28", "2027-10-26", "2027-11-30",
+      "2027-12-28", "2028-01-25", "2028-02-29", "2028-03-28"]],
+    [0.375, ["2028-04-25", "2028-05-30", "2028-06-27", "2028-07-25", "2028-08-29", "2028-09-26", "2028-10-31", "2028-11-28",
+      "2028-12-26", "2029-01-30", "2029-02-27", "2029-03-27"]],
+    [0.25, ["2029-04-24", "2029-05-29", "2029-06-26", "2029-07-31", "2029-08-28", "2029-09-25", "2029-10-30", "2029-11-27",
+      "2029-12-24", "2030-01-29", "2030-02-26", "2030-03-28"]],
+    [0.075, ["2030-04-25", "2030-05-30", "2030-06-27", "2030-07-25", "2030-08-29", "2030-09-26", "2030-10-31", "2030-11-28"]],
+  ];
+  const sheetRows = sheet.flatMap(([s, days]) => days.map((day) => [day, s] as const));
+  const sheetMisses = sheetRows.filter(([day, s]) => bidAskSpreadPercent(day) !== s).map(([day]) => day);
+  check(
+    "Bid Ask buckets give every workbook sheet row its spread",
+    sheetRows.length === 59 && sheetMisses.length === 0,
+    `${sheetRows.length - sheetMisses.length} of ${sheetRows.length} ${sheetMisses.join(", ")}`,
+  );
+  const edges: Array<[string, number]> = [
+    ["2027-03-31", 0.75], ["2027-04-01", 0.5], ["2028-03-31", 0.5], ["2028-04-01", 0.375], ["2029-03-31", 0.375],
+    ["2029-04-01", 0.25], ["2030-03-31", 0.25], ["2030-04-01", 0.075], ["2031-03-26", 0.075],
+    // Not on the sheet, so the workbook prices it at vol 0 (bug B10); here it falls in its bucket.
+    ["2027-07-29", 0.5],
+    ["2027-03-30T00:00:00.000Z", 0.75],
+  ];
+  const edgeMisses = edges.filter(([day, s]) => bidAskSpreadPercent(day) !== s).map(([day]) => day);
+  check("Bid Ask buckets run through 31 March, and an expiry off the sheet still gets a spread", edgeMisses.length === 0, edgeMisses.join(", "));
+  check(
+    "Bid Ask buckets are 0.75, 0.5, 0.375, 0.25, then 0.075",
+    BID_ASK_BUCKETS.map((b) => `${b.through ?? "after"}:${b.spreadPercent}`).join(" ") ===
+      "2027-03-31:0.75 2028-03-31:0.5 2029-03-31:0.375 2030-03-31:0.25 after:0.075",
+  );
+  const table = bidAskTableRows(surface);
+  check(
+    "Bid Ask table rows: one per surface expiry",
+    table.length === surface.expiries.length &&
+      table.every((row, i) => row.expiry === surface.expiries[i]!.slice(0, 10) && row.spreadPercent === bidAskSpreadPercent(row.expiry)),
+    table.map((row) => `${row.expiry} ${row.spreadPercent}`).join(", "),
+  );
+
+  // Live legs: the table against an explicit 0, and a flat spread against the old formula rebuilt from its parts.
+  const products = book.filter((_, i) => i % 25 === 0);
+  let legs = 0;
+  let ordered = 0;
+  let strictLegs = 0;
+  let strict = 0;
+  let tableZ = 0;
+  let zeroFlat = 0;
+  let rebuilt = 0;
+  let rebuiltLegs = 0;
+  const valuationDate = parseISODate(AS_OF);
+  for (const [n, p] of products.entries()) {
+    const underlying = underlyingFromProductName(p.productName, p.productCode);
+    const spot = underlying === "Sensex" ? SENSEX : NIFTY;
+    const withTable = priceProductBook({ product: p, spot, valuationDate: AS_OF, surface, underlying });
+    const withZero = priceProductBook({ product: p, spot, valuationDate: AS_OF, surface, underlying, bidAskSpread: 0 });
+    withTable.forEach((row, i) => {
+      if (row.expired) return;
+      const zero = withZero[i]!;
+      legs += 1;
+      if (row.sellPrice <= row.price && row.price <= row.buyPrice) ordered += 1;
+      if (row.price >= 1) {
+        strictLegs += 1;
+        if (row.sellPrice < row.price && row.price < row.buyPrice) strict += 1;
+      }
+      if (row.bidOffer === (2 * bidAskSpreadPercent(row.maturity)) / 100) tableZ += 1;
+      if (
+        zero.bidOffer === 0 &&
+        zero.sellPrice === zero.price &&
+        zero.buyPrice === zero.price &&
+        zero.price === row.price &&
+        zero.volatility === row.volatility
+      ) {
+        zeroFlat += 1;
+      }
+    });
+    // A flat number is priced exactly as before: σ ∓ z ÷ 2 into Black–Scholes, rounded to the paisa.
+    if (n % 6 !== 0) continue;
+    for (const leg of p.legs) {
+      if (leg.reqQuantity == null || !Number.isFinite(leg.reqQuantity) || leg.reqQuantity === 0) continue;
+      const maturity = parseISODate(leg.expiry);
+      const tauYears = daysBetween(valuationDate, maturity) / 365;
+      if (tauYears <= 0) continue;
+      const { vol, fwd } = surfaceVolDecimal(surface, leg.strike, maturity, spot, underlying);
+      const isCall = /^c/i.test(String(leg.optionType));
+      const base = { spot, strike: leg.strike, tauYears, forwardGrowth: fwd, discountYield: fwd + 0.01, vol, isCall };
+      for (const z of [0, 0.02]) {
+        rebuiltLegs += 1;
+        const got = priceLeg({ leg, spot, valuationDate, surface, bidAskSpread: z, underlying });
+        if (
+          got.price === roundDeskMoney(blackScholesPrice(base)) &&
+          got.sellPrice === roundDeskMoney(blackScholesPrice({ ...base, vol: Math.max(vol - z / 2, 1e-8) })) &&
+          got.buyPrice === roundDeskMoney(blackScholesPrice({ ...base, vol: vol + z / 2 })) &&
+          got.bidOffer === z
+        ) {
+          rebuilt += 1;
+        }
+      }
+    }
+  }
+  check(
+    "Bid Ask table: Sell ≤ Mid ≤ Buy on every live leg, and Sell < Mid < Buy once the mid is ₹1 or more",
+    legs > 0 && ordered === legs && strictLegs > 0 && strict === strictLegs,
+    `${ordered} of ${legs} ordered, ${strict} of ${strictLegs} strict, ${products.length} products`,
+  );
+  check("Bid Ask table: each live leg's Bid Offer is 2 × s(expiry) ÷ 100", tableZ === legs, `${tableZ} of ${legs}`);
+  check("explicit 0: Sell = Mid = Buy with Bid Offer 0, and the same mid and vol as the table", zeroFlat === legs, `${zeroFlat} of ${legs}`);
+  check("a flat spread (0 or 0.02) prices exactly as the old formula", rebuiltLegs > 0 && rebuilt === rebuiltLegs, `${rebuilt} of ${rebuiltLegs}`);
+
+  // The unwind: the headline quote is mid-based, so only the book's option cash takes the spread.
+  let same = 0;
+  let adverse = 0;
+  let marks = 0;
+  for (const p of products) {
+    const inputs = { ...productBookInputs(p, { unwindDate: AS_OF, nifty: NIFTY, sensex: SENSEX }), expirySpots: inputsFor(p).expirySpots };
+    const t = computeUnwind({ product: p, surface, inputs });
+    const z = computeUnwind({ product: p, surface, inputs: { ...inputs, bidAskSpread: 0 } });
+    if (t.unwindQuoteRs === z.unwindQuoteRs && t.clientIRR === z.clientIRR && t.bidAskSpread === null && z.bidAskSpread === 0) same += 1;
+    if (t.masterEconomics.premiumOutflowRs <= z.masterEconomics.premiumOutflowRs) adverse += 1;
+    const pricer = priceProductBook({ product: p, spot: t.spot, valuationDate: AS_OF, surface, underlying: inputs.underlying as UnderlyingIndex });
+    const sideMark = (i: number, original: string) => (/^s/i.test(original) ? pricer[i]!.buyPrice : pricer[i]!.sellPrice);
+    if (t.optionRows.every((row, i) => row.expired || Math.abs(row.unwindPrice) === sideMark(i, row.original))) marks += 1;
+  }
+  check("Bid Ask table leaves the headline quote and Client IRR as they are", same === products.length, `${same} of ${products.length}`);
+  check("Bid Ask table only ever lowers Premium Outflow", adverse === products.length, `${adverse} of ${products.length}`);
+  check("Options Book marks are the table Buy (original Sell) and Sell (original Buy) prices", marks === products.length, `${marks} of ${products.length}`);
+  check(
+    "the Product Book basis has no flat spread",
+    !("bidAskSpread" in productBookInputs(book[0]!, { unwindDate: AS_OF, nifty: NIFTY, sensex: SENSEX })),
+  );
+}
+
+// Exit Value, the AZ carry and Current IRR on the book quote (workbook K, L, U, BH, Summary G).
+/** The Product Book basis (quotes route): table spread, issued debentures, desk spots, closes from `closes`. */
+function quoteBasis(p: ProductMaster, closes: (day: string) => number): UnwindInputs {
+  const expirySpots: Record<string, number> = {};
+  for (const day of collectExpiredLegExpiryDates(p, AS_OF)) expirySpots[day] = closes(day);
+  return { ...productBookInputs(p, { unwindDate: AS_OF, nifty: NIFTY, sensex: SENSEX }), expirySpots };
+}
+{
+  let carried = 0;
+  let withCarry = 0;
+  let rates = 0;
+  const valuation = parseISODate(AS_OF);
+  for (const p of book) {
+    const { result } = pricedOf(p);
+    let manual = 0;
+    for (const row of result.optionRows) {
+      if (row.expired) manual += (row.premiumOutflowRs * p.premDiscRate * daysBetween(parseISODate(row.expiry), valuation)) / 365;
+    }
+    const value = bookValue(p, result);
+    if (
+      value.settledCarryRs === roundDeskMoney(manual) &&
+      value.exitValueRs === roundDeskMoney(result.masterEconomics.unwindValueRs + value.settledCarryRs) &&
+      value.bookQuoteRs === roundDeskMoney(value.exitValueRs / result.totalDebs)
+    ) {
+      carried += 1;
+    }
+    if (value.settledCarryRs !== 0) withCarry += 1;
+    const irr = irrSet(result, p);
+    const bookIrr = rateZeroCoupon(result.investedTenorDays / 365, p.faceValue, value.bookQuoteRs);
+    const cap = maxIrr(p);
+    const want = result.investedTenorDays > 0 && value.bookQuoteRs > 0 ? (cap == null ? bookIrr : Math.min(bookIrr, cap)) : null;
+    if (irr.bookIRR === bookIrr && irr.currentIrr === want) rates += 1;
+  }
+  check(
+    "Exit Value is Unwind Value plus Σ settled cash × Premium Discounting Rate × days since expiry ÷ 365",
+    carried === book.length && withCarry > 0,
+    `${carried} of ${book.length}; ${withCarry} carry settled cash`,
+  );
+  check("Current IRR is min(the zero-coupon rate on Exit Value ÷ debentures, Max IRR)", rates === book.length, `${rates} of ${book.length}`);
+  const p961 = named("Nifty Accelerator - 961");
+  check("no settled leg, no carry", settledOutflowCarryRs(p961, pricedOf(p961).result) === 0);
+}
+
+// Headline quote: Number of Spreads is a size, so its sign never flips a premium cell.
+{
+  const p961 = named("Nifty Accelerator - 961");
+  const flipped: ProductMaster = {
+    ...p961,
+    legs: p961.legs.map((leg) => (/^s/i.test(String(leg.originalSide)) ? { ...leg, spreads: -leg.spreads } : leg)),
+  };
+  const inputs = pricedOf(p961).inputs;
+  const a = computeUnwind({ product: p961, surface, inputs });
+  const b = computeUnwind({ product: flipped, surface, inputs });
+  check(
+    "sold legs stored with negative spreads give the same headline quote",
+    p961.legs.every((leg) => leg.spreads >= 0) &&
+      a.unwindQuoteRs === b.unwindQuoteRs &&
+      a.clientIRR === b.clientIRR &&
+      a.masterEconomics.unwindValueRs === b.masterEconomics.unwindValueRs,
+    `${a.unwindQuoteRs.toFixed(2)} and ${b.unwindQuoteRs.toFixed(2)}`,
+  );
+  let negative = 0;
+  let close = 0;
+  for (const p of book) {
+    if (!p.legs.some((leg) => leg.spreads < 0)) continue;
+    negative += 1;
+    const r = pricedOf(p).result;
+    if (Math.abs(r.unwindQuoteRs - r.masterEconomics.unwindQuoteRs) <= 100) close += 1;
+  }
+  console.log(`  live products with negative spreads: ${negative}; headline within ₹100 of the book quote at no spread: ${close}`);
+}
+
+// Expected Difference at Maturity (maturity.ts): mid marks, carried to maturity.
+{
+  const sampleEd = [
+    named("Nifty Accelerator - 664"),
+    named("Nifty Accelerator - 735"),
+    named("Nifty Accelerator - 961"),
+    named("Gearing Sensex Accelerator - 22"),
+  ];
+  let identity = 0;
+  let spreadFree = 0;
+  const lines: string[] = [];
+  const g = (rate: number, days: number) => Math.pow(1 + rate, days / 365);
+  const valuation = parseISODate(AS_OF);
+  for (const p of sampleEd) {
+    const underlying = underlyingFromProductName(p.productName, p.productCode);
+    const inputs = quoteBasis(p, (day) => fixedClose(day, underlying));
+    const withTable = computeUnwind({ product: p, surface, inputs });
+    const atZero = computeUnwind({ product: p, surface, inputs: { ...inputs, bidAskSpread: 0 } });
+    const got = expectedDifferenceAtMaturity(p, withTable, surface)!;
+    if (got === expectedDifferenceAtMaturity(p, atZero, surface)) spreadFree += 1;
+    // Rebuilt from the product fields and the z = 0 Options Book cash.
+    const full = atZero.investedTenorDays + atZero.residualTenor;
+    const maturity = new Date(valuation.getTime() + atZero.residualTenor * 86_400_000);
+    const amountWithNbfc = p.mobilization * (1 - p.inbuilt - p.tranCost - p.issuanceCost - p.marginCost) - p.totalFundsForMargin;
+    let atMaturity =
+      amountWithNbfc * g(p.prdDiscRate, full) +
+      p.totalFundsForMargin * g(p.marginFundingRate, full) +
+      bookPremiumFraction(p) * p.mobilization * g(p.premDiscRate, full);
+    for (const row of atZero.optionRows) {
+      const expiry = parseISODate(row.expiry);
+      const carry = g(p.premDiscRate, daysBetween(expiry, maturity));
+      if (row.expired) {
+        atMaturity += row.premiumOutflowRs * carry;
+      } else {
+        const { fwd } = surfaceVolDecimal(surface, row.strike, expiry, atZero.spot, underlying);
+        atMaturity += row.premiumOutflowRs * Math.exp((fwd + 0.01) * (daysBetween(valuation, expiry) / 365)) * carry;
+      }
+    }
+    const want = atMaturity - postObservationFigures(p, null).expectedAmount;
+    if (Math.abs(got - want) < 0.05) identity += 1;
+    lines.push(`${p.productName.trim()} ${got.toFixed(2)}`);
+  }
+  check("Expected Difference is the book and option cash carried to maturity less Expected Amount", identity === sampleEd.length, lines.join("; "));
+  check("Expected Difference reads mid marks: the same with the table spread and with 0", spreadFree === sampleEd.length, `${spreadFree} of ${sampleEd.length}`);
+  check(
+    "Expected Difference is blank without a face value",
+    expectedDifferenceAtMaturity({ ...sampleEd[0]!, faceValue: 0 }, pricedOf(sampleEd[0]!).result, surface) === null,
+  );
+
+  // Composer: the desk-spot unwind's values when no level is set, the level's own unwind when one is.
+  let copied = 0;
+  for (const p of book) {
+    const { inputs, result } = pricedOf(p);
+    const q = activeManagementQuote({ product: p, asOf: AS_OF, result, surface, fixings: inputs.expirySpots, target: actualTargetFor(p), expected: null, today: AS_OF });
+    if (
+      q.expectedDifferenceRs === expectedDifferenceAtMaturity(p, result, surface) &&
+      q.exitValueRs === bookValue(p, result).exitValueRs &&
+      q.expectedExitValueRs === q.exitValueRs
+    ) {
+      copied += 1;
+    }
+  }
+  check("no expected level: Expected Difference and both Exit Values come from the desk-spot unwind", copied === book.length, `${copied} of ${book.length}`);
+  const p735 = named("Nifty Accelerator - 735");
+  const { inputs: in735, result: r735 } = pricedOf(p735);
+  const up = expectedIrrAtLevel({ product: p735, surface, inputs: in735, level: NIFTY + 1000 });
+  const moved = unwindAtLevel({ product: p735, surface, base: in735, level: NIFTY + 1000 });
+  const q735 = activeManagementQuote({ product: p735, asOf: AS_OF, result: r735, surface, fixings: in735.expirySpots, target: actualTargetFor(p735), expected: up, today: AS_OF });
+  const ed735 = expectedDifferenceAtMaturity(p735, r735, surface)!;
+  check(
+    "an expected level reprices Exit Value, Expected IRR and Expected Difference at that level",
+    q735.expectedExitValueRs === bookValue(p735, moved).exitValueRs &&
+      q735.expectedIrr === irrSet(moved, p735).currentIrr &&
+      q735.expectedDifferenceRs === expectedDifferenceAtMaturity(p735, moved, surface) &&
+      q735.exitValueRs === bookValue(p735, r735).exitValueRs &&
+      q735.expectedExitValueRs! > q735.exitValueRs! &&
+      q735.expectedDifferenceRs! > ed735,
+    `${q735.exitValueRs} → ${q735.expectedExitValueRs}; ${ed735} → ${q735.expectedDifferenceRs}`,
+  );
+}
+
+// Pending Observations: workbook BI without its bugs.
+{
+  const cases: Array<[string[], string | null]> = [
+    [[], null],
+    [["2026-07-28"], "Jul-26"],
+    [["2026-07-28", "2026-10-27"], "Jul-26, Oct-26"],
+    [["2026-11-24", "2026-12-29", "2027-01-25"], "Nov-26, Dec-26 & Jan-27"],
+    [["2026-11-24", "2026-12-29", "2027-01-25", "2027-02-23"], "Nov-26, Dec-26, Jan-27 & Feb-27"],
+    [["2027-03-30", "2027-06-29", "2027-09-28", "2027-12-28", "2028-03-28"], "Mar-27, Jun-27, Sep-27, Dec-27 & Mar-28"],
+  ];
+  const misses = cases
+    .filter(([dates, want]) => pendingObservationsText(dates) !== want)
+    .map(([dates]) => `${dates.length} dates → ${pendingObservationsText(dates)}`);
+  check("Pending Observations format cases", misses.length === 0, misses.join("; "));
+  let agree = 0;
+  for (const p of book) {
+    const { inputs, result } = pricedOf(p);
+    const q = activeManagementQuote({ product: p, asOf: AS_OF, result, surface, fixings: inputs.expirySpots, target: actualTargetFor(p), expected: null, today: AS_OF });
+    if (
+      q.pendingObservations === pendingObservationsText(remainingObservationDays(p, AS_OF)) &&
+      (q.pendingObservations == null) === (q.observationsLeft === 0)
+    ) {
+      agree += 1;
+    }
+  }
+  check("Pending Observations lists the remaining observation days, blank when none are left", agree === book.length, `${agree} of ${book.length}`);
+}
+
+// Scenario cells carry Expected Difference, with its change 0 at k = 0.
+{
+  let centred = 0;
+  for (const p of sample) {
+    const { inputs, result } = pricedOf(p);
+    const g = scenarioGrid({ product: p, surface, inputs, baseResult: result });
+    if (
+      g.base.expectedDifferenceRs === expectedDifferenceAtMaturity(p, result, surface) &&
+      g.base.change.expectedDifferenceRs === 0 &&
+      g.base.exitValueRs === bookValue(p, result).exitValueRs &&
+      g.base.irr.currentIrr === irrSet(result, p).currentIrr &&
+      // The AZ carry is settled cash, the same at every level.
+      g.cells.every((c) => c.change.exitValueRs === c.change.unwindValueRs) &&
+      g.cells.every((c) => c.change.expectedDifferenceRs === roundDeskMoney(c.expectedDifferenceRs! - g.base.expectedDifferenceRs!))
+    ) {
+      centred += 1;
+    }
+  }
+  check("scenario cells carry Exit Value and Expected Difference, change 0 at k = 0", centred === sample.length, `${centred} of ${sample.length}`);
+  const p961 = named("Nifty Accelerator - 961");
+  const { inputs: in961 } = pricedOf(p961);
+  const g961 = scenarioGrid({ product: p961, surface, inputs: in961 });
+  const atLevelEd = (level: number) => expectedDifferenceAtMaturity(p961, unwindAtLevel({ product: p961, surface, base: in961, level }), surface);
+  check(
+    "each level's Expected Difference is that level's unwind grown to maturity, and rises with the index",
+    g961.cells.every((c) => c.expectedDifferenceRs === atLevelEd(c.level)) &&
+      g961.cells[20]!.expectedDifferenceRs! > g961.cells[0]!.expectedDifferenceRs!,
+    `${g961.cells[0]!.expectedDifferenceRs} … ${g961.cells[20]!.expectedDifferenceRs}`,
+  );
+}
+
+/** POST /api/multi/scenarios body work on three products, with fixed closes in place of Yahoo. */
+async function bookScenarioChecks() {
+  const three = [named("Nifty Accelerator - 961"), named("Nifty Accelerator - 740"), named("Gearing Sensex Accelerator - 22")];
+  const closes = async (dates: string[], underlying: UnderlyingIndex) =>
+    Object.fromEntries(dates.map((day) => [day, fixedClose(day, underlying)]));
+  const rows = await bookScenarioRows({ products: three, surface, nifty: NIFTY, sensex: SENSEX, unwindDate: AS_OF, closes });
+  let good = 0;
+  for (const p of three) {
+    const row = rows[productKey(p)];
+    const underlying = underlyingFromProductName(p.productName, p.productCode);
+    const r = computeUnwind({ product: p, surface, inputs: quoteBasis(p, (day) => fixedClose(day, underlying)) });
+    const centre = row?.cells.find((c) => c.shift === 0);
+    if (
+      row != null &&
+      centre != null &&
+      row.cells.length === 21 &&
+      row.cells.every((c, i) => c.shift === BOOK_SCENARIO_SHIFTS[i] && c.level === row.baseSpot + c.shift) &&
+      row.baseSpot === (underlying === "Sensex" ? SENSEX : NIFTY) &&
+      centre.unwindQuoteRs === r.unwindQuoteRs &&
+      centre.premiumOutflowRs === r.masterEconomics.premiumOutflowRs &&
+      centre.unwindValueRs === r.masterEconomics.unwindValueRs &&
+      centre.exitValueRs === bookValue(p, r).exitValueRs &&
+      centre.currentIrr === irrSet(r, p).currentIrr &&
+      centre.expectedDifferenceRs === expectedDifferenceAtMaturity(p, r, surface)
+    ) {
+      good += 1;
+    }
+  }
+  check(
+    "book scenario rows: 21 shifts from −1,000 to +1,000, centre equal to the Product Book unwind",
+    good === three.length && BOOK_SCENARIO_SHIFTS.length === 21 && BOOK_SCENARIO_SHIFTS[0] === -1000 && BOOK_SCENARIO_SHIFTS[20] === 1000,
+    `${good} of ${three.length}`,
+  );
+  const failing = await bookScenarioRows({ products: three, surface, nifty: NIFTY, sensex: SENSEX, unwindDate: AS_OF, closes: async () => ({}) });
+  check(
+    "a product whose closes are missing is null and the rest still price (the error logged above is expected)",
+    failing[productKey(three[1]!)] === null && failing[productKey(three[0]!)] != null && failing[productKey(three[2]!)] != null,
+  );
+}
+
+void bookScenarioChecks()
+  .catch((err) => check("book scenario checks ran", false, err instanceof Error ? err.message : String(err)))
+  .then(() => {
+    console.log(failures ? `\n${failures} Active Management checks FAILED` : "\nActive Management checks PASSED");
+    if (failures) process.exit(1);
+  });

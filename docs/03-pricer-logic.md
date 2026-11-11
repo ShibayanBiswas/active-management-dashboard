@@ -1,7 +1,7 @@
 # 03 — Calculation Logic: Pricer Table
 
-This document is the complete map from the reference Pricer sheet to the live table on
-`/portfolio/pricer`. Every column, formula, convention, type field, API field and golden
+This document is the complete map from the reference Pricer sheet to the Pricer Table tab on
+`/portfolio/unwinding` (the separate Pricer page was removed; see [11](11-active-management.md)). Every column, formula, convention, type field, API field and golden
 check lives here. The unwind marks on the Options Book reuse the same engine — see
 [02 — Unwind Quote and Whole-Book Economics](02-calculation-logic.md).
 
@@ -116,8 +116,8 @@ count. If `tauYears <= 0` the leg is treated as expired (see Expired legs below)
 
 ## Volatility surface interpolation
 
-The **seeded** book is the October 2026 Volatility Surface in `lib/data/vol-surface-seed.json`
-(`monthKey` `2026-10` in the file, **14 live expiries** 27-Oct-2026 → 26-Mar-2031, Deep plus 20
+The **seeded** book is the November 2026 Volatility Surface in `lib/data/vol-surface-seed.json`
+(`monthKey` `2026-11` in the file, **14 live expiries** 23-Nov-2026 → 26-Mar-2031, Deep plus 20
 Strike Change percent columns; Deep carries the 55% vols). The golden tables below stay on the
 frozen September 2026 surface in `lib/data/vol-surface-golden-sep-2026.json`.
 Home shows that grid. If Mongo has no upload for the current calendar month, the latest earlier
@@ -128,8 +128,8 @@ from 29-Mar-2023 through 29-Dec-2029. That is a reference-file check, not the li
 
 **Columns** — Deep is always ₹500. The other columns are Strike Change percents of the
 monthly **reference** index: Reference Nifty Price for Nifty products, Reference Sensex
-Price for Sensex products. 100 percent = that reference (October 2026 seed: 22,421.95 /
-71,909.70 as of 1 Oct 2026; September 2026 golden: 24,090.85 / 77,264.51).
+Price for Sensex products. 100 percent = that reference (November 2026 seed: 23,053.10 /
+74,459.53 as of 1 Nov 2026, the 30 Oct closes; September 2026 golden: 24,090.85 / 77,264.51).
 Black–Scholes still uses the live unwind spot.
 
 ### Strike interpolation
@@ -172,7 +172,7 @@ not divide by 100. That conversion happens in `surfaceVolDecimal`.
 σ = volPercent / 100 + VolatilityBump
 ```
 
-For the October seed and the September golden book, Volatility Bump is **0.00 percent**, so `σ` is exactly the
+For the November seed and the September golden book, Volatility Bump is **0.00 percent**, so `σ` is exactly the
 interpolated surface vol as a decimal. Example on the September 2026 grid for the golden
 first leg: interpolated 14.17149079547172 percent → `σ = 0.1417149079547172`. The
 reference XLSM MarketData grid at the same strike and expiry interpolates 16.065484933208093
@@ -188,7 +188,7 @@ carries a single month block:
 | Volatility Bump | 0.00% |
 | Forward Sell Rate | 6.60% |
 
-`lookupFwdSellRate` returns that flat 6.60 percent for every maturity in the October and September books. A
+`lookupFwdSellRate` returns that flat 6.60 percent for every maturity in the November and September books. A
 multi-point parameter sheet is still accepted and linearly interpolated by maturity date:
 the sample Date / Vol Bump / Fwd table, or the native XLSM **Pricing Params** layout
 (date in column B, BID / vol bump in column C, Fwd Sell rate in column H). Excel MATCH
@@ -365,7 +365,7 @@ percent grid.
 Replay the same inputs on the XLSM MarketData grid (`npm run verify:xlsm`) and the engine
 returns vol **16.065484933208093 percent**, price **944.33**, delta **−0.2635** — matching
 the Pricer sheet of `Unwinding Calculator (New) Mar 2022 (Apr'24-Mar'25) - Sample.xlsm`
-to a few paise. The rows below are the September golden file; the live desk prices on the October seed. An open desk
+to a few paise. The rows below are the September golden file; the live desk prices on the November seed. An open desk
 carries the latest grid under the current month and replaces the 100% anchors with that month's Yahoo close.
 
 ## Golden rows
@@ -438,7 +438,7 @@ Pricer Table page runs `priceProductBook` in the browser on the selected product
 
 ## UI and export
 
-- Route: `/portfolio/pricer`
+- Route: the Pricer Table tab on `/portfolio/unwinding` (`?tab=pricer` opens it)
 - Same full-width Input Parameters panel as the Unwinding Calculator (2 / 4 / 7-column fill)
 - Reveal-to-view, then the full 14-column table (no Option Code) with row-span merging on repeated values
 - Table chrome: Primary SP premium sticky header, dual H+V scroll (`.desk-table-scroll`)

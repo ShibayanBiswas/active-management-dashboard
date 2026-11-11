@@ -4,6 +4,54 @@ Newest first. Each entry lists what changed, why, and where. Historical notes ar
 they were written on that day (a later entry may restyle something an earlier entry
 introduced).
 
+## 2026-11-11 — November surface, Bid Ask table, Expected Difference and the Scenario Table
+
+**November 2026 Volatility Surface** (ported from Unwinding Calculator `5d2ab0e`):
+- Source file: `Final Surface Nov 26.xlsx`.
+- 14 expiries, 23-Nov-2026 to 26-Mar-2031. Deep ₹500 carries the 55% vols.
+- References: Nifty 23,053.10 and Sensex 74,459.53, the closes on or before 1-Nov-2026.
+- The upload parser now reads a file with no Deep column, where the dates sit just before
+  55%, instead of taking those dates as Deep vols. `verify:vol-expiries` checks that the
+  desk's own file parses to the seed.
+
+**Bid Ask spreads, following the workbook's pricing sheet:**
+- Per-expiry volatility spreads (`lib/data/bid-ask-seed.json`). An option originally sold is
+  unwound at surface + s, one originally bought at surface − s.
+- Applied to every live leg unless the Bid Ask Spread input holds a number; 0 reproduces the
+  Unwinding Calculator.
+- Shown in the Pricer Table and in a new Desk Book tab.
+
+**New and changed Active Management figures:**
+- Exit Value is the book unwind value plus the workbook's carry on settled option cash.
+- Current and Expected IRR now run on that book quote, as the workbook's Summary G does.
+- Expected Difference (at maturity), Mobilization, Pending Observations, and a totals strip
+  are added.
+
+**Expected levels replace the Assumed Level inputs:**
+- Expected figures follow the Nifty or Sensex Spot Level edited on the Unwinding
+  Calculator, and are at today's spot otherwise.
+
+**Unwinding Calculator page:**
+- The separate Pricer page is gone; the Black Scholes Pricer tab is now the Pricer Table.
+- The Active Management tab and the Scenario Grid drop Product, Client and Residual IRR,
+  and add Expected Difference.
+- Page downloads include the three Active Management tabs.
+
+**Home:** a book-wide Scenario Table below Post Observation Analytics:
+- products × 21 levels from −1,000 to +1,000;
+- the Product Book's filters, shared through `lib/multi/book-filters.ts`;
+- measure tabs, and Excel with one sheet per measure.
+
+**Engine:**
+- Client and Residual Internal Rate of Return are shown no higher than Product Internal
+  Rate of Return everywhere they appear, on screen and in downloads.
+- The headline premium cell uses the absolute number of spreads, so a sold leg with a
+  negative count is not double-negated. This moved 108 live headline quotes.
+
+**Checks:**
+- `verify:tally` reconciles the app with the reference workbook. See
+  [11](11-active-management.md) and [12](12-workbook-tally.md).
+
 ## 2026-11-09 — Active Management layer on the twin
 
 - Product Book gains eleven columns (Current and Expected Internal Rate of Return, Actual and

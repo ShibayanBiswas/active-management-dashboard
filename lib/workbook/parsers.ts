@@ -343,7 +343,10 @@ export function parseVolSurfaceWorkbook(
     }
     expiries.push(excelDateToIso(dateCell));
     const vols: number[] = [];
-    for (let c = deepVolCol; c < deepVolCol + volWidth; c++) {
+    // No Deep column: the dates sit just before 55%, so Deep · ₹500 takes the 55% vol.
+    const firstVolCol = dateCol === deepVolCol ? deepVolCol + 1 : deepVolCol;
+    if (firstVolCol !== deepVolCol) vols.push(Number(row[firstVolCol] ?? 0));
+    for (let c = firstVolCol; c < deepVolCol + volWidth; c++) {
       vols.push(Number(row[c] ?? 0));
     }
     volsPercent.push(vols);

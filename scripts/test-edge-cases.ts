@@ -24,6 +24,18 @@ import {
 import { pickDeskClose } from "../lib/market-data";
 import { dedupeOptionLegs, optionLegCloneKey } from "../lib/multi/leg-position";
 import { oldestObservationYmd, productMatchesObservationRange } from "../lib/multi/observation-date-filter";
+import {
+  PROGRESS_TAB_ORDER,
+  bookTabProducts,
+  bookViewLabels,
+  progressTabCounts,
+  progressTabProducts,
+  revealDateRange,
+  revealedProducts,
+  somePassedProducts,
+  type RevealWindow,
+} from "../lib/multi/book-filters";
+import { productHasProgressTab } from "../lib/active-management/observations";
 import { pickCarriedVolSurface } from "../lib/data/load";
 import { expiryForObservationTab, observationDatesForProduct, productHasObservationTab, productsForObservationTab, productsWithLiveMaturity, remainingObservationDays, LIVE_OBSERVATION_TAB_ORDER, OBSERVATION_TAB_ORDER } from "../lib/observation-tabs";
 import type { ProductMaster, VolSurface } from "../lib/types";
@@ -512,23 +524,23 @@ check("Nifty code without Sensex stays Nifty", underlyingFromProductName("Dual B
   const niftyStrikes = moneynessStrikes(surface, 22800, "Nifty");
   const sensexStrikes = moneynessStrikes(surface, 80000, "Sensex");
   check(
-    "nifty 100% strike is 1 Oct 2026 Nifty close",
+    "nifty 100% strike is 1 Nov 2026 Nifty close",
     Math.abs((niftyStrikes[10] ?? 0) - AUGUST_REFERENCE_UNDERLYING_PRICE) < 1e-9,
     String(niftyStrikes[10]),
   );
   check(
-    "sensex 100% strike is 1 Oct 2026 Sensex close",
+    "sensex 100% strike is 1 Nov 2026 Sensex close",
     Math.abs((sensexStrikes[10] ?? 0) - AUGUST_REFERENCE_SENSEX_PRICE) < 1e-9,
     String(sensexStrikes[10]),
   );
   check(
     "nifty strike grid shows paise (not integer-rounded 100% anchor)",
-    formatNumber(AUGUST_REFERENCE_UNDERLYING_PRICE, INDEX_STRIKE_PRICE_DECIMALS) === "22,421.95",
+    formatNumber(AUGUST_REFERENCE_UNDERLYING_PRICE, INDEX_STRIKE_PRICE_DECIMALS) === "23,053.10",
     formatNumber(AUGUST_REFERENCE_UNDERLYING_PRICE, 0),
   );
   check(
     "sensex strike grid shows paise at 100% anchor",
-    formatNumber(AUGUST_REFERENCE_SENSEX_PRICE, INDEX_STRIKE_PRICE_DECIMALS) === "71,909.70",
+    formatNumber(AUGUST_REFERENCE_SENSEX_PRICE, INDEX_STRIKE_PRICE_DECIMALS) === "74,459.53",
   );
   const expiry = parseISODate("2027-02-25");
   const niftyVol = interpolateVolPercent(surface, AUGUST_REFERENCE_UNDERLYING_PRICE, expiry, 22800, "Nifty");
@@ -697,8 +709,14 @@ check("Nifty code without Sensex stays Nifty", underlyingFromProductName("Dual B
     PRODUCT_BOOK_HEADERS.slice(-ACTIVE_MANAGEMENT_BOOK_HEADERS.length).join("|") === ACTIVE_MANAGEMENT_BOOK_HEADERS.join("|"),
   );
   check(
-    "a pending quote shows the Active Management cells as pending",
-    matrix.rows.every((row) => row.slice(-ACTIVE_MANAGEMENT_BOOK_HEADERS.length).every((cell) => cell === "…")),
+    "a pending quote shows the Active Management cells as pending, Mobilization still the master amount",
+    matrix.rows.every((row) =>
+      row
+        .slice(-ACTIVE_MANAGEMENT_BOOK_HEADERS.length)
+        .every((cell, i) =>
+          ACTIVE_MANAGEMENT_BOOK_HEADERS[i] === "Mobilization" ? cell !== "…" && cell.startsWith("₹") : cell === "…",
+        ),
+    ),
   );
   const live = productsWithLiveMaturity(multiSeed as ProductMaster[], "2026-10-03");
   const oldestObs = oldestObservationYmd(live, "2026-10-03");
@@ -726,11 +744,11 @@ check("Nifty code without Sensex stays Nifty", underlyingFromProductName("Dual B
     ["2027-01", "January 2027 Volatility Surface"],
     ["2027-06", "June 2027 Volatility Surface"],
   ] as const) {
-    const rolled = labelSurfaceForDeskMonth(surface, future[0], { nifty: 23000.25, sensex: 74000.5 });
+    const rolled = labelSurfaceForDeskMonth(septemberSurface, future[0], { nifty: 23000.25, sensex: 74000.5 });
     check(`${future[0]} carry names that month`, rolled.label === future[1] && rolled.monthKey === future[0], rolled.label);
     check(
-      `${future[0]} carry keeps the seed grid and uses that month's anchors`,
-      rolled.expiries.length === surface.expiries.length &&
+      `${future[0]} carry keeps the previous grid and uses that month's anchors`,
+      rolled.expiries.length === septemberSurface.expiries.length &&
         rolled.referenceUnderlyingPrice === 23000.25 &&
         rolled.referenceSensexPrice === 74000.5,
     );
@@ -776,6 +794,87 @@ check("Nifty code without Sensex stays Nifty", underlyingFromProductName("Dual B
       (header) => (spans[0]?.[PRODUCT_BOOK_HEADERS.indexOf(header)] ?? 0) === matrix.rows.length,
     ),
   );
+  check(
+    "Expected Difference, Exit Value, Mobilization and Pending Observations are merge columns",
+    (["Expected Difference", "Exit Value", "Mobilization", "Pending Observations"] as const).every((header) =>
+      PRODUCT_BOOK_MERGE_COLS.includes(PRODUCT_BOOK_HEADERS.indexOf(header)),
+    ),
+  );
+}
+
+{
+  // The Product Book's filters before they moved to lib/multi/book-filters.ts, verbatim.
+  // The Product Book and the Book Scenario Table now both filter through the shared module.
+  const legacyMatches = (product: ProductMaster, needle: string) =>
+    !needle ||
+    [product.productName, product.productCode, product.formulae]
+      .map((value) => String(value ?? "").trim())
+      .filter((value) => value.length > 0 && value !== "-")
+      .some((value) => value.toLowerCase().includes(needle));
+  const legacyClamp = (value: string, min: string, max: string) => (!value ? min : value < min ? min : value > max ? max : value);
+  const asOf = "2026-10-03";
+  const live = productsWithLiveMaturity(multiSeed as ProductMaster[], asOf);
+  const somePassed = somePassedProducts(live, asOf);
+  const legacySome = new Set(live.filter((p) => productHasProgressTab(p, "some-passed", asOf)));
+  check("shared progress membership equals the Product Book's", somePassed.size === legacySome.size && [...legacySome].every((p) => somePassed.has(p)));
+  const oldest = oldestObservationYmd(live, asOf);
+  const reveals: Array<RevealWindow | null> = [
+    null,
+    { mode: "any", start: oldest, end: asOf },
+    { mode: "first", start: "2025-01-01", end: "2026-06-30" },
+    { mode: "last", start: "2026-01-01", end: asOf },
+    { mode: "any", start: "2026-09-01", end: "2026-09-30" },
+  ];
+  let combos = 0;
+  let mismatches = 0;
+  for (const query of ["", "  Nifty ", "sensex", "1569", "INE", "no such product"]) {
+    for (const tab of LIVE_OBSERVATION_TAB_ORDER.map((item) => item.id)) {
+      const needle = query.trim().toLowerCase();
+      const legacyTab = live.filter((p) => legacyMatches(p, needle) && productHasObservationTab(p, tab, asOf));
+      const tabProducts = bookTabProducts(live, query, tab, asOf);
+      for (const reveal of reveals) {
+        const legacyFiltered = reveal
+          ? legacyTab.filter((p) => productMatchesObservationRange(p, reveal.mode, reveal.start, reveal.end))
+          : legacyTab;
+        const filtered = revealedProducts(tabProducts, reveal);
+        const counts = progressTabCounts(filtered, somePassed);
+        const legacySomeCount = legacyFiltered.filter((p) => legacySome.has(p)).length;
+        if (
+          counts.all !== legacyFiltered.length ||
+          counts["some-passed"] !== legacySomeCount ||
+          counts["none-passed"] !== legacyFiltered.length - legacySomeCount
+        ) {
+          mismatches += 1;
+        }
+        for (const progress of PROGRESS_TAB_ORDER.map((item) => item.id)) {
+          combos += 1;
+          const legacyShown =
+            progress === "all"
+              ? legacyFiltered
+              : legacyFiltered.filter((p) => legacySome.has(p) === (progress === "some-passed"));
+          const shown = progressTabProducts(filtered, progress, somePassed);
+          if (shown.length !== legacyShown.length || shown.some((p, i) => p !== legacyShown[i])) mismatches += 1;
+        }
+      }
+    }
+  }
+  check(`shared book filters match the Product Book's on ${combos} search, tab, window and progress views`, mismatches === 0, String(mismatches));
+  check("progress tabs are All Products then the two progress tabs", PROGRESS_TAB_ORDER.map((t) => t.label).join("|") === "All Products|No Observation Passed|At Least One Observation Passed");
+  for (const [start, end] of [["", ""], ["2019-01-01", "2099-01-01"], ["2026-05-01", "2026-04-01"], ["2026-05-01", ""], ["", "2026-02-01"]] as const) {
+    const legacyStart = legacyClamp(start || oldest, oldest, asOf);
+    const legacyEnd = legacyClamp(end || asOf, legacyStart || oldest, asOf);
+    const range = revealDateRange(oldest, asOf, start, end);
+    check(`Start Date and End Date clamp as before (${start || "blank"} to ${end || "blank"})`, range.start === legacyStart && range.end === legacyEnd, `${range.start} ${range.end}`);
+  }
+  const labels = bookViewLabels("obs-2m", "some-passed", { mode: "first", start: "2026-01-05", end: "2026-10-03" });
+  check(
+    "Export View names the tab, progress tab and revealed window as before",
+    labels.tab === "Observation in 2 Month" &&
+      labels.progress === "At Least One Observation Passed" &&
+      labels.revealed === "First Observation 5-Jan-26 to 3-Oct-26",
+    JSON.stringify(labels),
+  );
+  check("Export View leaves an unapplied progress tab and window out", JSON.stringify(bookViewLabels("ongoing", "all", null)) === JSON.stringify({ tab: "Ongoing", progress: "", revealed: "" }));
 }
 
 const passedBook = {

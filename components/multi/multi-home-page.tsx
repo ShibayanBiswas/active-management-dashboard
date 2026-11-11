@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 
 import { DeskBookExplorer } from "@/components/dashboard/desk-book-explorer";
-import { AssumedLevelInputs } from "@/components/multi/assumed-level-inputs";
+import { BookScenarioTable } from "@/components/multi/book-scenario-table";
 import { MultiProductTable } from "@/components/multi/multi-product-table";
 import { PostObservationTable } from "@/components/multi/post-observation-table";
 import { AppPage, Panel, SectionTitle, SpecRail } from "@/components/layout/app-ui";
@@ -119,7 +119,6 @@ export function MultiHomePage() {
           <HorizontalBand>
             <Panel>
               <SectionTitle icon={Sparkles}>Product Book</SectionTitle>
-              <AssumedLevelInputs />
               <MultiProductTable />
             </Panel>
           </HorizontalBand>
@@ -130,6 +129,15 @@ export function MultiHomePage() {
             <Panel>
               <SectionTitle icon={Sparkles}>Post Observation Analytics</SectionTitle>
               <PostObservationTable />
+            </Panel>
+          </HorizontalBand>
+        </motion.div>
+
+        <motion.div {...bandMotion} transition={{ ...bandMotion.transition, delay: 0.11 }}>
+          <HorizontalBand>
+            <Panel>
+              <SectionTitle icon={Sparkles}>Book Scenario Table</SectionTitle>
+              <BookScenarioTable />
             </Panel>
           </HorizontalBand>
         </motion.div>
@@ -146,7 +154,7 @@ export function MultiHomePage() {
                     Open Quote Desk <ArrowRight className="h-4 w-4" />
                   </span>
                 </Link>
-                <Link href="/portfolio/pricer" className="desk-module-tile">
+                <Link href="/portfolio/unwinding?tab=pricer" className="desk-module-tile">
                   <span className="desk-module-tile__kicker">Portfolio</span>
                   <span className="desk-module-tile__title">
                     <Table2 className="h-4 w-4 shrink-0 text-gold" /> Pricer Table

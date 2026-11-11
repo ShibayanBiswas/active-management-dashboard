@@ -81,6 +81,21 @@ export function observationFacts(
   };
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * Workbook Calculator!BI "Pending Obs": each upcoming observation date as MMM-YY, one per date.
+ * "Jul-26", "Jul-26, Oct-26", "Nov-26, Dec-26 & Jan-27", "Nov-26, Dec-26, Jan-27 & Feb-27".
+ * Fixes the workbook's bugs (spec §8, B5): null instead of "," or #VALUE! when nothing is pending,
+ * no "Jan-00" for passed dates, three dates work, and a comma after the first date.
+ */
+export function pendingObservationsText(dates: string[]): string | null {
+  const labels = dates.map((date) => `${MONTHS[Number(date.slice(5, 7)) - 1] ?? "-"}-${date.slice(2, 4)}`);
+  if (!labels.length) return null;
+  if (labels.length <= 2) return labels.join(", ");
+  return `${labels.slice(0, -1).join(", ")} & ${labels[labels.length - 1]}`;
+}
+
 export type ObservationProgressTab = "none-passed" | "some-passed";
 
 export const OBSERVATION_PROGRESS_TABS = [

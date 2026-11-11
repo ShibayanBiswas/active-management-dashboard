@@ -37,9 +37,11 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run lint:unused
-      # Offline engine goldens on the seeds (no Yahoo, no Mongo), then the Active Management add-ons.
+      # Offline engine goldens on the seeds (no Yahoo, no Mongo), then the Active Management add-ons
+      # and the reference workbook tally (scripts/fixtures/workbook-tally.json).
       - run: npm run verify:parity
       - run: npm run verify:edge
       - run: npm run verify:pricer
       - run: npm run verify:am
+      - run: npm run verify:tally
       - run: npm run build

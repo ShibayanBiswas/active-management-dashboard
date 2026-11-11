@@ -83,8 +83,8 @@ absolute-strike row** captured at a reference Nifty near **25,424.65**
 MarketData cell on that file was patched to 24,366; the wing columns were not, so the
 strike row is internally inconsistent. The desk convention is Deep = ₹500 and every other
 column = Strike Change percent × the matching index reference from Surface Parameters
-(October 2026 seed: **Reference Nifty Price 22,421.95** and **Reference Sensex Price
-71,909.70** at the 100% column; the September 2026 golden surface uses 24,090.85 / 77,264.51). Sensex products interpolate on the Sensex anchors.
+(November 2026 seed: **Reference Nifty Price 23,053.10** and **Reference Sensex Price
+74,459.53** at the 100% column, the 30 Oct 2026 closes; the September 2026 golden surface uses 24,090.85 / 77,264.51). Sensex products interpolate on the Sensex anchors.
 Black–Scholes still uses the **live unwind spot**. The app follows that split
 (`referenceUnderlyingPrice` / `referenceSensexPrice` + `moneynessStrikes`).
 
@@ -99,7 +99,7 @@ Worked first-leg check, product 1567 Put 31,360 expiry 31-Aug-2028:
 Black–Scholes matches. The vol lookup does not. Do **not** switch the app onto Excel’s
 frozen strikes to chase the Unwind Diff file.
 
-Forward Sell Rate **6.60 percent** on the October and September seeds and on Excel’s 2028+ MATCH is the
+Forward Sell Rate **6.60 percent** on the November and September seeds and on Excel’s 2028+ MATCH is the
 same number, not a second bug. The sample / seed stores one month-end point at
 7 percent. Native XLSM **Pricing Params** (date in column B, BID in C, Fwd Sell rate in
 H) is parsed when that file is uploaded; short-tenor rows may still show 3.85
@@ -501,7 +501,7 @@ Option marks depend on the Volatility Surface.
 |---------|-------------------------------:|----------------|
 | XLSM MarketData (Apr'24–Mar'25) | 944.33 | Workbook **142.96%**. Engine **143.17%** because all 24 legs are marked |
 | September 2026 golden surface (`vol-surface-golden-sep-2026.json`) | 684.61 | **147.18%** |
-| October 2026 live seed | 523.39 | **148.84%** |
+| November 2026 live seed | 698.03 | **147.67%** |
 
 The XLSM Pricer prices only **10 of 24 legs** and leaves fourteen deep out-of-the-money
 legs at a zero unwind price. This engine marks every leg. On that file’s own MarketData

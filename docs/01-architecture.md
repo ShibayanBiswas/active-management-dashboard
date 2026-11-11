@@ -128,7 +128,7 @@ Defined in `lib/types.ts`.
 
 | Type | Purpose |
 |------|---------|
-| `VolSurface` | Month key, label, Deep ₹500 (55% vols) plus percent columns, 14 live expiries on the October 2026 seed, `volsPercent` grid, `pricingParams`, `referenceUnderlyingPrice` (Nifty), `referenceSensexPrice` |
+| `VolSurface` | Month key, label, Deep ₹500 (55% vols) plus percent columns, 14 live expiries on the November 2026 seed, `volsPercent` grid, `pricingParams`, `referenceUnderlyingPrice` (Nifty), `referenceSensexPrice` |
 | `PricingParamPoint` | Date, `volBump`, `fwdSellRate` |
 | `OptionLeg` | Type, strike, spreads, side, expiry, `reqQuantity`, `sdCode`, `prdPrice`, `qtyDivisor` |
 | `ProductMaster` | Facts plus `legs[]` |

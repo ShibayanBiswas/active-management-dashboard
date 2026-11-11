@@ -37,7 +37,7 @@ export function productPricerTable(args: {
     spot,
     valuationDate: inputs.unwindDate,
     surface,
-    bidAskSpread: inputs.bidAskSpread ?? 0,
+    bidAskSpread: inputs.bidAskSpread,
     underlying,
   });
   if (rows.length !== result.optionRows.length) {

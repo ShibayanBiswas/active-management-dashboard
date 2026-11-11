@@ -1,6 +1,13 @@
-import { inputsAtLevel, scenarioGrid, scenarioLevels, type ScenarioCell, type ScenarioGrid } from "@/lib/active-management/scenario";
+import type { UnwindBasis } from "@/components/active-management/am-table";
+import {
+  inputsAtLevel,
+  scenarioChange,
+  scenarioGrid,
+  scenarioLevels,
+  type ScenarioCell,
+  type ScenarioGrid,
+} from "@/lib/active-management/scenario";
 import type { ProductMaster, UnwindInputs, UnwindResult, VolSurface } from "@/lib/types";
-import { roundDeskMoney } from "@/lib/utils";
 
 /**
  * The same grid as scenarioGrid, priced one level at a time with a yield to the browser between
@@ -8,7 +15,7 @@ import { roundDeskMoney } from "@/lib/utils";
  * scenarioGrid with no steps at that level: the same unwind and the same cell fields as the full
  * grid. Returns null when cancelled.
  */
-export async function scenarioGridInSteps(args: {
+async function scenarioGridInSteps(args: {
   product: ProductMaster;
   surface: VolSurface;
   inputs: UnwindInputs;
@@ -38,21 +45,37 @@ export async function scenarioGridInSteps(args: {
   if (args.cancelled?.()) return null;
 
   const b = centre.base;
-  const diff = (a: number | null, c: number | null) => (a == null || c == null ? null : a - c);
   const cells: ScenarioCell[] = raw.map((c, i) => ({
     ...c,
     k: i - steps,
     shift: (i - steps) * centre.step,
     level: levels[i]!,
-    change: {
-      unwindQuoteRs: roundDeskMoney(c.unwindQuoteRs - b.unwindQuoteRs),
-      unwindQuotePct: c.unwindQuotePct - b.unwindQuotePct,
-      premiumOutflowRs: roundDeskMoney(c.premiumOutflowRs - b.premiumOutflowRs),
-      unwindValueRs: roundDeskMoney(c.unwindValueRs - b.unwindValueRs),
-      clientIRR: c.irr.clientIRR - b.irr.clientIRR,
-      residualIRR: c.irr.residualIRR - b.irr.residualIRR,
-      currentIrr: diff(c.irr.currentIrr, b.irr.currentIrr),
-    },
+    change: scenarioChange(c, b),
   }));
   return { ...centre, cells, base: cells[steps]! };
+}
+
+/** One grid per unwind on screen: reopening the tab or downloading on the same unwind does not reprice. */
+const grids = new WeakMap<UnwindBasis, ScenarioGrid>();
+
+export function cachedScenarioGrid(basis: UnwindBasis): ScenarioGrid | null {
+  return grids.get(basis) ?? null;
+}
+
+/** The grid for the unwind on screen, from the cache or priced level by level and then cached. */
+export async function scenarioGridFor(
+  basis: UnwindBasis,
+  options: { onLevel?: (done: number, total: number) => void; cancelled?: () => boolean } = {},
+): Promise<ScenarioGrid | null> {
+  const hit = grids.get(basis);
+  if (hit) return hit;
+  const grid = await scenarioGridInSteps({
+    product: basis.product,
+    surface: basis.surface,
+    inputs: basis.inputs,
+    baseResult: basis.result,
+    ...options,
+  });
+  if (grid) grids.set(basis, grid);
+  return grid;
 }

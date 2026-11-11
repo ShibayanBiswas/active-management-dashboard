@@ -7,7 +7,8 @@
  * expiry (Excel date, then a vol in percent points per strike). The Deep · ₹500 column
  * takes the 55% vols. Expiries already passed on the IST calendar are dropped.
  * Forward Sell Rate and Volatility Bump carry over from the current seed. The 100% Nifty
- * and Sensex anchors are the Yahoo closes on the first session of the month.
+ * and Sensex anchors are the Yahoo closes on or before the 1st of the month (the live
+ * desk's rule), so a 1st on a weekend takes the last session before it.
  */
 import fs from "node:fs";
 import path from "node:path";

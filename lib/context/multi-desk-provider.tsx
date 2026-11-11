@@ -31,13 +31,23 @@ export function sameAssumedLevels(a: AssumedLevels, b: AssumedLevels): boolean {
   return a.nifty === b.nifty && a.sensex === b.sensex;
 }
 
+/** Quiet time after the last Nifty or Sensex keystroke before the book re-prices at the expected level. */
+const EXPECTED_LEVEL_DEBOUNCE_MS = 800;
+
+/** The typed level when it is a real level away from the desk spot (half a paisa of tolerance), else null. */
+function expectedLevel(typed: number | null | undefined, desk: number | null): number | null {
+  if (desk == null || typed == null || !Number.isFinite(typed) || !(typed > 0)) return null;
+  return Math.abs(typed - desk) < 0.005 ? null : typed;
+}
+
 export type MultiQuote = ProductBookQuoteView & {
   quotePct: number | null;
   /** Null while pending or when the unwind failed. */
   am: ActiveManagementQuote | null;
   /**
-   * The assumedLevels sent with the batch that priced this quote (client stamp, not from the route).
-   * Expected IRR is stale while it differs from the current assumedLevels.
+   * The expectedLevels sent with the batch that priced this quote (client stamp, not from the route).
+   * Expected IRR, Expected Exit Value and Expected Difference are stale while it differs from the
+   * current expectedLevels.
    */
   pricedAt: AssumedLevels;
 };
@@ -76,8 +86,12 @@ export type MultiQuotesContextValue = {
   quotesLoaded: number;
   /** Live-maturity products targeted for the current quote pass. */
   quotesTotal: number;
-  assumedLevels: AssumedLevels;
-  setAssumedLevels: (next: AssumedLevels) => void;
+  /**
+   * Read-only levels for Expected IRR, Expected Exit Value and Expected Difference: the Unwinding
+   * page's Nifty (Sensex) Spot Level when it differs from today's desk spot, else null (the desk
+   * spot). Debounced about 800 ms so typing does not re-quote per keystroke.
+   */
+  expectedLevels: AssumedLevels;
   /** Desk spots the current quote pass priced at. */
   deskLevels: AssumedLevels;
 };
@@ -96,7 +110,8 @@ const defaultInputs: UnwindInputs = {
   sensex: null,
   nifty: null,
   underlying: "Nifty",
-  bidAskSpread: 0,
+  // Bid Ask table: each leg takes its expiry's spread, as in the workbook.
+  bidAskSpread: null,
 };
 
 async function readApiPayload(res: Response): Promise<Record<string, unknown>> {
@@ -148,10 +163,22 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
   const [quotesLoading, setQuotesLoading] = useState(false);
   const [quotesLoaded, setQuotesLoaded] = useState(0);
   const [quotesTotal, setQuotesTotal] = useState(0);
-  const [assumedLevels, setAssumedLevels] = useState<AssumedLevels>({ nifty: null, sensex: null });
   const [deskLevels, setDeskLevels] = useState<AssumedLevels>({ nifty: null, sensex: null });
+  const [expectedLevels, setExpectedLevels] = useState<AssumedLevels>({ nifty: null, sensex: null });
   const [asOfToday, setAsOfToday] = useState(todayISO);
   const [inputs, setInputsState] = useState<UnwindInputs>(defaultInputs);
+
+  // Expected level follows the Unwinding page's spot levels: today's desk spot by default
+  // (null), the edited level once the desk changes it.
+  const typedNifty = expectedLevel(inputs.nifty, deskLevels.nifty);
+  const typedSensex = expectedLevel(inputs.sensex, deskLevels.sensex);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const next = { nifty: typedNifty, sensex: typedSensex };
+      setExpectedLevels((prev) => (sameAssumedLevels(prev, next) ? prev : next));
+    }, EXPECTED_LEVEL_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [typedNifty, typedSensex]);
   /** Drop late /api/multi/dataset responses so a slow first load cannot overwrite a fresh upload. */
   const refreshGen = useRef(0);
 
@@ -174,7 +201,7 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
 
   /**
    * Stable signature so merging the full book for Expired does not restart quote pricing.
-   * A new assumed level re-runs the pass; the quotes on screen stay until the new ones merge in.
+   * A new expected level re-runs the pass; the quotes on screen stay until the new ones merge in.
    */
   const quoteRunKey = useMemo(() => {
     if (!surface || !products.length) return "";
@@ -186,17 +213,17 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
       productKey(products[0]!),
       mid ? productKey(mid) : "",
       productKey(products[products.length - 1]!),
-      String(assumedLevels.nifty ?? ""),
-      String(assumedLevels.sensex ?? ""),
+      String(expectedLevels.nifty ?? ""),
+      String(expectedLevels.sensex ?? ""),
     ].join("|");
-  }, [asOfToday, products, surface, assumedLevels]);
+  }, [asOfToday, products, surface, expectedLevels]);
 
   const productsRef = useRef(products);
   productsRef.current = products;
   const surfaceRef = useRef(surface);
   surfaceRef.current = surface;
-  const assumedRef = useRef(assumedLevels);
-  assumedRef.current = assumedLevels;
+  const expectedRef = useRef(expectedLevels);
+  expectedRef.current = expectedLevels;
 
   const applySelected = useCallback((next: ProductMaster, prevCode?: string) => {
     const issued = issuedCount(next);
@@ -327,7 +354,7 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
     if (!quoteRunKey) return;
     const book = productsRef.current;
     const surf = surfaceRef.current;
-    const assumed = assumedRef.current;
+    const assumed = expectedRef.current;
     if (!book.length || !surf) return;
     let cancelled = false;
     setQuotesLoading(true);
@@ -413,13 +440,17 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
           if (!spotsApplied && (nifty != null || sensex != null)) {
             spotsApplied = true;
             setDeskLevels({ nifty, sensex });
-            setInputsState((prev) => ({
-              ...prev,
-              nifty,
-              sensex,
-              spot: prev.underlying === "Sensex" ? (sensex ?? prev.spot) : (nifty ?? prev.spot),
-              unwindDate: asOf,
-            }));
+            // A pass priced at an expected level was started by the desk editing a spot level:
+            // keep that edit, or writing the desk spot back would clear it and re-price again.
+            if (assumed.nifty == null && assumed.sensex == null) {
+              setInputsState((prev) => ({
+                ...prev,
+                nifty,
+                sensex,
+                spot: prev.underlying === "Sensex" ? (sensex ?? prev.spot) : (nifty ?? prev.spot),
+                unwindDate: asOf,
+              }));
+            }
           }
           flushQuotes(i + batchSize >= live.length);
           await new Promise<void>((resolve) => {
@@ -561,11 +592,10 @@ export function MultiDatasetProvider({ children }: { children: ReactNode }) {
       quotesLoading,
       quotesLoaded,
       quotesTotal,
-      assumedLevels,
-      setAssumedLevels,
+      expectedLevels,
       deskLevels,
     }),
-    [quotes, quotesLoading, quotesLoaded, quotesTotal, assumedLevels, deskLevels],
+    [quotes, quotesLoading, quotesLoaded, quotesTotal, expectedLevels, deskLevels],
   );
 
   const datasetValue = useMemo<DatasetContextValue>(

@@ -12,8 +12,9 @@ On top of that sits the **Active Management layer** ([docs/11](docs/11-active-ma
 - Product Book columns for Current and Expected Internal Rate of Return, Actual and Effective
   Target, and Observations Passed and Left with their start and end dates.
 - No Observation Passed and At Least One Observation Passed tabs.
-- Assumed Nifty and Sensex Levels.
-- Per-product Active Management, Black Scholes Pricer and ±1,000-point Scenario Grid tabs on the
+- Expected IRR and Expected Difference at maturity, at today's spot or the Spot Level edited on the Unwinding Calculator.
+- A book-wide Scenario Table and a Bid Ask Spread table.
+- Per-product Active Management, Pricer Table and ±1,000-point Scenario Grid tabs on the
   Unwinding Calculator.
 
 Styling follows the Primary SP Dashboard (maroon `#7a1e2c`, gold `#d4b24c`, serif headings)
@@ -34,7 +35,7 @@ npm run verify:desk           # live pages + multi APIs (needs npm run dev on po
 npm run collate:multi         # FY21–FY27 multi book → multi-products-seed.json (+ Mongo when URI set)
 npm run bake:am-targets       # Actual Target seed from the New Primary master (../Secondary SP Dashboard)
 npm run build:samples         # clean sample input files (light headers, compact cells)
-npm run seed                  # optional — requires MONGODB_URI (October vol surface + multi book)
+npm run seed                  # optional — requires MONGODB_URI (November vol surface + multi book)
 ```
 
 Never commit `.env.local`. Never run `npm run build` while `npm run dev` is using the same
@@ -45,8 +46,7 @@ folder.
 | Route | Purpose |
 |-------|---------|
 | `/` | Home — live Product Book (quote, IRRs, Premium Outflow, facts, and one Options Book row per leg, then the eleven Active Management columns; observation-date Reveal; observation progress tabs; Assumed Levels; no expired products), Post Observation Analytics, Desk Snapshot, Desk Modules, Desk Book with **Expired** tab |
-| `/portfolio/unwinding` | Unwinding Calculator — product picker, five tabs plus Active Management, Black Scholes Pricer and Scenario Grid, each with branded Excel/PDF (dynamic columns, no cell padding) |
-| `/portfolio/pricer` | Pricer Table — 14 columns, no Option Code, merged repeats, branded Excel/PDF |
+| `/portfolio/unwinding` | Unwinding Calculator — product picker, five tabs plus Active Management, Pricer Table and Scenario Grid, each with branded Excel/PDF (dynamic columns, no cell padding) |
 | `/intelligence` | Logic Atlas — pipelines, primitives, desk module lanes |
 | `/upload` | Volatility Surface and Multiple Product Master uploads — open, schema-checked, popup result |
 
@@ -63,12 +63,12 @@ under Desk Book → Expired. Product Book quotes load via batched server marks
 
 - **Unwinding Date** (allotment through today, default **today**), Underlying (Choose The
   Value, then Nifty or Sensex), Nifty Spot Level and Sensex Spot Level (Yahoo Finance live
-  or historical), Bid Ask Spread (default 0). Number of Debentures defaults to Total
+  or historical), Bid Ask Spread (blank uses the Bid Ask table per expiry; a number is a flat spread). Number of Debentures defaults to Total
   Debentures in Issue. Input Parameters uses one full-width row per field, matching Primary
   SP Product Details.
 - Two monthly uploads: Volatility Surface (percent Strike Change grid, Deep ₹500 carrying
   the 55% vols, Volatility Bump, Forward Sell Rate **6.60 percent**; seed monthKey
-  **2026-10**, 14 expiries 27-Oct-2026 → 26-Mar-2031, sample `Vol_Surface_Input_October.xlsx`;
+  **2026-11**, 14 expiries 23-Nov-2026 → 26-Mar-2031, sample `Vol_Surface_Input_November.xlsx`;
   rebake with `npm run bake:vol -- "<surface.xlsx>" <YYYY-MM>`) and the Multiple Product
   Master (**28 input columns**, including Contingent Level and Margin Cost). The web Desk
   Book shows **27 columns** (Contingent Level hidden — equals Initial Underlying Level on

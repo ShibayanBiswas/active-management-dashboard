@@ -3,7 +3,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Download, FileText, type LucideIcon } from "lucide-react";
 
-import { GhostButton, PrimaryButton, SectionTitle } from "@/components/layout/app-ui";
+import { GhostButton, PrimaryButton, SectionTitle, SpecRail } from "@/components/layout/app-ui";
 import type { ProductMaster, UnwindInputs, UnwindResult, VolSurface } from "@/lib/types";
 import { cn, computeGroupedRowSpans } from "@/lib/utils";
 import type { AmExportDoc, AmTable } from "@/lib/workbook/am-export-columns";
@@ -16,11 +16,22 @@ export type UnwindBasis = {
   result: UnwindResult;
 };
 
-/** Table panel header, as on the Options Book: title left, downloads right. */
+/**
+ * SpecRail cards that wrap into rows instead of scrolling sideways: one column on a phone,
+ * as many 12rem columns as fit on a tablet or desktop.
+ */
+const REFLOW =
+  "[&_.horizontal-rail-spec-inner]:grid-flow-row [&_.horizontal-rail-spec-inner]:grid-cols-[repeat(auto-fit,minmax(min(100%,12rem),1fr))]";
+
+export function CardGrid({ cards, className }: { cards: Array<{ label: string; value: string }>; className?: string }) {
+  return <SpecRail className={cn(REFLOW, className)} cards={cards} />;
+}
+
+/** Panel header, as on the Options Book: title left, downloads right, below the title on a phone. */
 export function AmPanelHeader({ title, icon, children }: { title: string; icon: LucideIcon; children?: ReactNode }) {
   return (
     <div className="border-b border-[color:var(--ar-border)] px-4 py-3">
-      <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           <SectionTitle icon={icon}>{title}</SectionTitle>
         </div>
@@ -56,7 +67,7 @@ export function AmExportButtons({ doc, result, name }: { doc: AmExportDoc | null
 
   const waiting = `Wait until the ${name} finishes loading`;
   return (
-    <div className="ml-auto flex shrink-0 flex-col items-end gap-2 self-start">
+    <div className="ml-auto flex max-w-full shrink-0 flex-col items-end gap-2 self-start">
       <div className="flex flex-wrap justify-end gap-2">
         <PrimaryButton
           type="button"

@@ -6,18 +6,13 @@ import type { UserOptions } from "jspdf-autotable";
 
 import { embedBrandLogo, fetchBrandLogoBase64 } from "@/lib/workbook/export-branding";
 import { buildDeskExportFilename } from "@/lib/workbook/export-filename";
-import {
-  OPTION_BOOK_HEADERS,
-  PRICER_TABLE_HEADERS,
-} from "@/lib/workbook/export-columns";
+import { OPTION_BOOK_HEADERS } from "@/lib/workbook/export-columns";
 import {
   SCREEN_EXPORT_DISCLAIMER,
   buildMultiProductBookWorkbook,
-  buildPricerScreenWorkbook,
   buildUnwindScreenWorkbook,
   exportInputRows,
   optionBookRowsFlat,
-  pricerTableRowsFlat,
 } from "@/lib/workbook/build-screen-excel";
 import type { AmExportDoc, AmTable, AmValue } from "@/lib/workbook/am-export-columns";
 import { createWorkbook } from "@/lib/workbook/excel-runtime";
@@ -37,8 +32,9 @@ import {
   excelThin,
 } from "@/lib/workbook/export-theme";
 import { writeExcelCell, type ExcelCell } from "@/lib/workbook/excel-cells";
-import type { PricerRow, UnwindResult } from "@/lib/types";
+import type { UnwindResult } from "@/lib/types";
 import {
+  capAtProductIrr,
   computeGroupedRowSpans,
   deskBlank,
   deskTodayISO,
@@ -49,7 +45,7 @@ import {
   formatPct,
 } from "@/lib/utils";
 import { spannedPdfBody } from "@/lib/workbook/pdf-table";
-import { OPTION_BOOK_MERGE_COLS, PRICER_MERGE_COLS } from "@/lib/workbook/table-merge";
+import { OPTION_BOOK_MERGE_COLS } from "@/lib/workbook/table-merge";
 
 export { SCREEN_EXPORT_DISCLAIMER };
 
@@ -85,7 +81,7 @@ function inputRows(result: UnwindResult): KV {
     ["Underlying", result.underlying || "—"],
     ["Number of Debentures", formatNumber(result.debentures, 0)],
     ["Unwinding Date", formatDeskDate(result.unwindDate)],
-    ["Bid Ask Spread", formatPct(result.bidAskSpread)],
+    ["Bid Ask Spread", result.bidAskSpread == null ? "As Per Bid Ask Table" : formatPct(result.bidAskSpread)],
     ["Underlying Spot Level", formatNumber(result.spot, 2)],
   ];
 }
@@ -95,8 +91,8 @@ function quoteRows(result: UnwindResult): KV {
     ["Unwind Quote Percent", formatPct(result.unwindQuotePct)],
     ["Unwind Quote Amount", formatRs(result.unwindQuoteRs)],
     ["Product Internal Rate of Return", formatPct(result.productIRR)],
-    ["Client Internal Rate of Return", formatPct(result.clientIRR)],
-    ["Residual Internal Rate of Return", formatPct(result.residualIRR)],
+    ["Client Internal Rate of Return", formatPct(capAtProductIrr(result.clientIRR, result.productIRR))],
+    ["Residual Internal Rate of Return", formatPct(capAtProductIrr(result.residualIRR, result.productIRR))],
   ];
 }
 
@@ -131,12 +127,6 @@ const OPTION_HEADERS = OPTION_BOOK_HEADERS;
 
 function optionRowsFlat(result: UnwindResult): string[][] {
   return optionBookRowsFlat(result).map((row) => row.map(pdfSafeText));
-}
-
-const PRICER_HEADERS = PRICER_TABLE_HEADERS;
-
-function pricerRowsFlat(rows: PricerRow[]): string[][] {
-  return pricerTableRowsFlat(rows).map((row) => row.map(pdfSafeText));
 }
 
 /* ── Excel helpers ────────────────────────────────────────────────────── */
@@ -327,10 +317,21 @@ async function saveWorkbook(wb: ExcelJS.Workbook, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 2_000);
 }
 
-export async function downloadUnwindScreenExcel(result: UnwindResult) {
+/**
+ * The Unwinding Calculator's workbook: Unwinding Summary and Options Book, then one sheet for each
+ * Active Management tab passed in (Active Management, Pricer Table, Scenario Grid), each laid out
+ * as its own tab download. Node-safe; downloadUnwindScreenExcel adds the logo and saves it.
+ */
+export async function buildUnwindPageWorkbook(result: UnwindResult, tabs: AmExportDoc[], logoOffset = 0) {
+  const wb = await buildUnwindScreenWorkbook(result, { logoOffset });
+  for (const doc of tabs) addActiveManagementSheet(wb, doc, result, logoOffset);
+  return wb;
+}
+
+export async function downloadUnwindScreenExcel(result: UnwindResult, tabs: AmExportDoc[] = []) {
   const logo = await fetchBrandLogoBase64();
   const logoOffset = logo ? 3 : 0;
-  const wb = await buildUnwindScreenWorkbook(result, { logoOffset });
+  const wb = await buildUnwindPageWorkbook(result, tabs, logoOffset);
   if (logo) {
     for (const sheet of wb.worksheets) {
       embedBrandLogo(wb, sheet, logo, Math.max(sheet.columnCount || 6, 6));
@@ -374,24 +375,6 @@ export async function downloadMultiProductBookExcel(
   );
 }
 
-export async function downloadPricerScreenExcel(rows: PricerRow[], productCode: string) {
-  const logo = await fetchBrandLogoBase64();
-  const logoOffset = logo ? 3 : 0;
-  const wb = await buildPricerScreenWorkbook(rows, productCode, { logoOffset });
-  if (logo) {
-    const sheet = wb.worksheets[0];
-    if (sheet) embedBrandLogo(wb, sheet, logo, PRICER_TABLE_HEADERS.length);
-  }
-  await saveWorkbook(
-    wb,
-    buildDeskExportFilename({
-      screen: "Pricer-Table",
-      productCode,
-      extension: "xlsx",
-    }),
-  );
-}
-
 /* ── PDF builder — same Primary SP chrome ─────────────────────────────── */
 
 const MARGIN = 14;
@@ -430,6 +413,16 @@ class ScreenPdfBuilder {
       this.contentWidth = this.doc.internal.pageSize.getWidth() - MARGIN * 2;
       this.y = MARGIN;
     }
+  }
+
+  /**
+   * Start a fresh A4 page in this orientation. jsPDF keeps it for every later addPage, so a
+   * table that runs on, and its autoTable continuation pages, stay in it too.
+   */
+  newPage(orientation: "portrait" | "landscape") {
+    this.doc.addPage("a4", orientation);
+    this.contentWidth = this.doc.internal.pageSize.getWidth() - MARGIN * 2;
+    this.y = MARGIN;
   }
 
   async addLogo() {
@@ -738,14 +731,19 @@ class ScreenPdfBuilder {
     }
   }
 
+  /** Drop a blank trailing page and add the page footers; the document is then complete. */
+  finish(): jsPDF {
+    this.dropTrailingBlankPage();
+    this.addFooters();
+    return this.doc;
+  }
+
   save(filename: string) {
     if (typeof document === "undefined") {
       throw new Error("PDF download is only available in the browser.");
     }
-    this.dropTrailingBlankPage();
-    this.addFooters();
     const name = filename.endsWith(".pdf") ? filename : `${filename}.pdf`;
-    this.doc.save(name);
+    this.finish().save(name);
   }
 }
 
@@ -755,7 +753,13 @@ async function createScreenPdf(orientation: "portrait" | "landscape" = "portrait
   return new ScreenPdfBuilder(doc, autoTableMod.default);
 }
 
-export async function downloadUnwindScreenPdf(result: UnwindResult) {
+/**
+ * The Unwinding Calculator's PDF: Input Parameters and the four summary tabs, then each Active
+ * Management tab passed in on its own pages (Pricer Table and Scenario Grid landscape), then the
+ * disclaimer. The opening Input Parameters serve every tab, so they are not repeated. Node-safe;
+ * downloadUnwindScreenPdf saves it.
+ */
+export async function buildUnwindScreenPdf(result: UnwindResult, tabs: AmExportDoc[]): Promise<ScreenPdfBuilder> {
   const pdf = await createScreenPdf("portrait");
   const stamp = screenExportStamp();
   const subtitle = `${result.productName} · ${result.productCode} · ${stamp}`;
@@ -785,8 +789,18 @@ export async function downloadUnwindScreenPdf(result: UnwindResult) {
 
   pdf.addSection("NBFC Book Values");
   pdf.addKeyValueTable(rupeeRows(result));
-  pdf.addDisclaimer();
 
+  for (const doc of tabs) {
+    pdf.newPage(doc.orientation);
+    pdf.addBanner(doc.title, amSubtitle(doc, result));
+    addAmPdfSections(pdf, doc);
+  }
+  pdf.addDisclaimer();
+  return pdf;
+}
+
+export async function downloadUnwindScreenPdf(result: UnwindResult, tabs: AmExportDoc[] = []) {
+  const pdf = await buildUnwindScreenPdf(result, tabs);
   pdf.save(
     buildDeskExportFilename({
       screen: "Unwinding-Calculator",
@@ -822,31 +836,7 @@ export async function downloadOptionsBookPdf(result: UnwindResult) {
   );
 }
 
-export async function downloadPricerScreenPdf(rows: PricerRow[], productCode: string) {
-  const pdf = await createScreenPdf("landscape");
-  const stamp = screenExportStamp();
-  const subtitle = `${productCode} · ${rows.length} Legs · ${stamp}`;
-  pdf.setDocumentProperties({
-    title: `Pricer Table · ${productCode}`,
-    subject: "Black-Scholes marks",
-  });
-
-  await pdf.addLogo();
-  pdf.addBanner("Pricer Table", subtitle);
-  pdf.addSection("Black Scholes Marks");
-  pdf.addDataTable([...PRICER_HEADERS], pricerRowsFlat(rows), 6.2, 0, PRICER_MERGE_COLS);
-  pdf.addDisclaimer();
-
-  pdf.save(
-    buildDeskExportFilename({
-      screen: "Pricer-Table",
-      productCode,
-      extension: "pdf",
-    }),
-  );
-}
-
-/* ── Active Management tabs: Active Management, Black Scholes Pricer, Scenario Grid ── */
+/* ── Active Management tabs: Active Management, Pricer Table, Scenario Grid ── */
 
 function amSubtitle(doc: AmExportDoc, result: UnwindResult): string {
   return [result.productName, result.productCode, doc.subtitle, screenExportStamp()].filter(Boolean).join(" · ");
@@ -889,8 +879,28 @@ function addAmTable(sheet: ExcelJS.Worksheet, startRow: number, table: AmTable):
   return next;
 }
 
-async function buildActiveManagementWorkbook(doc: AmExportDoc, result: UnwindResult, logoOffset: number) {
-  const wb = await createWorkbook();
+/** An Active Management tab's sections: key values as label and value rows, tables as desk tables. */
+function addAmPdfSections(pdf: ScreenPdfBuilder, doc: AmExportDoc) {
+  for (const section of doc.sections) {
+    pdf.addSection(section.title);
+    if (section.values) {
+      pdf.addKeyValueTable(section.values.map((value): [string, string] => [value.label, value.text]));
+    }
+    if (section.table) {
+      const cols = section.table.headers.length;
+      pdf.addDataTable(
+        section.table.headers,
+        section.table.text,
+        cols > 12 ? 5.4 : 6.8,
+        section.table.groupCol ?? 0,
+        section.table.mergeCols ?? [],
+      );
+    }
+  }
+}
+
+/** One Active Management tab as a sheet of `wb`: banner, its sections and the disclaimer. */
+function addActiveManagementSheet(wb: ExcelJS.Workbook, doc: AmExportDoc, result: UnwindResult, logoOffset: number) {
   const cols = Math.max(6, ...doc.sections.map((section) => section.table?.headers.length ?? 0));
   const ws = wb.addWorksheet(doc.sheetName, { views: [{ showGridLines: false }] });
   let row = addBanner(ws, doc.title, amSubtitle(doc, result), cols, logoOffset);
@@ -911,17 +921,15 @@ async function buildActiveManagementWorkbook(doc: AmExportDoc, result: UnwindRes
   }
   addDisclaimer(ws, row, cols);
   autofitExcelColumns(ws);
-  return wb;
+  return ws;
 }
 
 /** Excel for one Active Management tab: banner, its sections and the disclaimer on one sheet. */
 export async function downloadActiveManagementExcel(doc: AmExportDoc, result: UnwindResult) {
   const logo = await fetchBrandLogoBase64();
-  const wb = await buildActiveManagementWorkbook(doc, result, logo ? 3 : 0);
-  if (logo) {
-    const sheet = wb.worksheets[0];
-    if (sheet) embedBrandLogo(wb, sheet, logo, Math.max(sheet.columnCount || 6, 6));
-  }
+  const wb = await createWorkbook();
+  const sheet = addActiveManagementSheet(wb, doc, result, logo ? 3 : 0);
+  if (logo) embedBrandLogo(wb, sheet, logo, Math.max(sheet.columnCount || 6, 6));
   await saveWorkbook(
     wb,
     buildDeskExportFilename({
@@ -951,22 +959,7 @@ export async function downloadActiveManagementPdf(doc: AmExportDoc, result: Unwi
     pdf.addSection("Input Parameters");
     pdf.addKeyValueTable(inputRows(result));
   }
-  for (const section of doc.sections) {
-    pdf.addSection(section.title);
-    if (section.values) {
-      pdf.addKeyValueTable(section.values.map((value): [string, string] => [value.label, value.text]));
-    }
-    if (section.table) {
-      const cols = section.table.headers.length;
-      pdf.addDataTable(
-        section.table.headers,
-        section.table.text,
-        cols > 12 ? 5.4 : 6.8,
-        section.table.groupCol ?? 0,
-        section.table.mergeCols ?? [],
-      );
-    }
-  }
+  addAmPdfSections(pdf, doc);
   pdf.addDisclaimer();
 
   pdf.save(

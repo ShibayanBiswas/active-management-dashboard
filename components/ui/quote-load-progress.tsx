@@ -11,11 +11,13 @@ export function QuoteLoadProgress({
   loaded,
   total,
   label = "Pricing live unwind quotes for every ongoing product…",
+  title = "Loading Product Quotes",
 }: {
   active: boolean;
   loaded: number;
   total: number;
   label?: string;
+  title?: string;
 }) {
   const reduce = useReducedMotion();
   if (!active || total <= 0) return null;
@@ -30,7 +32,7 @@ export function QuoteLoadProgress({
           Live Unwind Engine
         </p>
         <h3 className="mt-1 font-serif text-xl text-[color:var(--ar-maroon)]">
-          Loading Product Quotes
+          {title}
         </h3>
         <p className="mt-1.5 min-h-[1.25rem] text-sm text-stone-500">{label}</p>
         <div className="mt-4 h-3 overflow-hidden rounded-full bg-black/5 dark:bg-white/10">

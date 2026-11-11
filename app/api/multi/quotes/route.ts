@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { activeManagementQuote, type ActiveManagementQuote } from "@/lib/active-management/book-row";
+import { productBookInputs } from "@/lib/active-management/book-scenario";
 import { expectedIrrAtLevel } from "@/lib/active-management/scenario";
 import { actualTargetFor } from "@/lib/active-management/target-seed";
 import { loadMultiDesk } from "@/lib/data/multi-load";
@@ -9,9 +10,9 @@ import {
   type UnwindWithSpotsResult,
 } from "@/lib/engine/compute-unwind-with-spots";
 import { resolveDeskSpots } from "@/lib/engine/desk-spots";
-import { issuedCount, productKey } from "@/lib/multi/product-key";
+import { productKey } from "@/lib/multi/product-key";
 import type { ProductMaster, UnwindInputs, VolSurface } from "@/lib/types";
-import { deskTodayISO, underlyingFromProductName } from "@/lib/utils";
+import { deskTodayISO } from "@/lib/utils";
 import { quoteViewFromUnwind, type ProductBookQuoteView } from "@/lib/workbook/product-book-rows";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +55,7 @@ function activeManagementFor(
       product,
       asOf: inputs.unwindDate,
       result,
+      surface,
       fixings,
       target: actualTargetFor(product),
       expected,
@@ -78,18 +80,9 @@ async function quoteProducts(
   > = {};
   for (const product of products) {
     const key = productKey(product);
-    const underlying = underlyingFromProductName(product.productName, product.productCode);
-    const spot = underlying === "Sensex" ? sensex : nifty;
     try {
-      const inputs: UnwindInputs = {
-        debentures: issuedCount(product),
-        unwindDate,
-        spot,
-        underlying,
-        nifty,
-        sensex,
-        bidAskSpread: 0,
-      };
+      // Issued debentures, desk spots, and each leg's Bid Ask table spread (no flat spread).
+      const inputs: UnwindInputs = productBookInputs(product, { unwindDate, nifty, sensex });
       const result = await computeUnwindWithExpirySpots({
         product,
         surface,

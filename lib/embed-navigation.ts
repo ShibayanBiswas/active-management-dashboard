@@ -10,7 +10,7 @@ const PARENT_ORIGIN = "https://sp-workstation.vercel.app";
 /** SP Workstation dev server on port 3000. Never accepted in a production build. */
 const LOCAL_PARENT_ORIGINS = new Set(["http://localhost:3000", "http://127.0.0.1:3000"]);
 
-/** Every nav route: Home, Portfolio and its two pages, Intelligence, Upload. */
+/** Every nav route: Home, Portfolio and its Unwinding Calculator, Intelligence, Upload. */
 const ROUTES = new Set(
   mainSections.flatMap((section) => [section.href, ...(section.subNav ?? []).map((sub) => sub.href)]),
 );

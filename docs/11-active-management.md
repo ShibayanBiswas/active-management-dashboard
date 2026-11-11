@@ -1,88 +1,136 @@
 # 11 — Active Management layer
 
 The Active Management Dashboard is the Unwinding Calculator's Multiple Product Version (docs
-01 to 10) with one layer added on top. Every figure in this layer comes out of the same
-`computeUnwind` and `priceProductBook` calls the Unwinding screens use; there is no second
-Black–Scholes, vol lookup or unwind chain. Nothing Unwinding already shows has changed.
+01 to 10) with one layer on top. That layer follows the Active Management workbook, which
+is an extended Unwind Calculator, wherever the workbook goes further than the Unwinding
+Calculator. Every rupee and rate comes out of the same `computeUnwind` and
+`priceProductBook` calls the Unwinding screens use; there is no second Black–Scholes, vol
+lookup or unwind chain. [12](12-workbook-tally.md) reconciles the app against the workbook
+line by line.
 
-Code: `lib/active-management/` (pure functions, no React, no fetch),
-`components/active-management/`, `components/multi/assumed-level-inputs.tsx`,
-`lib/workbook/am-export-columns.ts`, and the `am` field on `POST /api/multi/quotes`.
+Code:
+- `lib/active-management/`: pure functions, no React and no fetch.
+- `components/active-management/`.
+- `components/multi/book-scenario-table.tsx` and `lib/multi/book-filters.ts`.
+- `lib/workbook/am-export-columns.ts` and `lib/workbook/book-scenario-export.ts`.
+- The `am` block on `POST /api/multi/quotes`.
+- `POST /api/multi/scenarios`.
 
 ## Definitions
 
 | Figure | Formula | Notes |
 |--------|---------|-------|
-| Observation dates | The product's unique Option Expiry Dates | `productObservationYmds`. First date is the Observation Start Date, last is the Observation End Date |
-| Passed | Date on or before the valuation date | Same rule that settles expired options, so an expiry on the valuation date counts as passed |
-| Index close | Close on or before each passed date | The same Yahoo closes the unwind settles expired options at (`expirySpotsUsed`); one fetch serves both |
-| Average So Far | Σ passed closes ÷ Observations Passed | "-" while any passed close is missing |
-| Actual Target | Target Nifty on the New Primary product master; else the highest strike among the originally sold Puts | Baked into `lib/data/am-targets-seed.json` by `npm run bake:am-targets`; Sensex rows carry their Sensex-scale target in the same field |
-| Effective Target | (Actual Target × Total − Σ passed closes) ÷ Observations Left | Equals the Actual Target before the first observation. "-" when nothing is left, there are no observations, or a passed close is missing |
-| Max rate | (1 + Coupon)^(365 ÷ Tenor Days) − 1 | Identical to Product Internal Rate of Return, so it has no column of its own. A zero coupon or tenor means no cap |
-| Current Internal Rate of Return | min(Client Internal Rate of Return, Product Internal Rate of Return) | "-" when invested tenor is 0 or the quote is at or below zero |
-| Expected Internal Rate of Return at Assumed Level | min(Client Internal Rate of Return of a full unwind at the assumed level, Product Internal Rate of Return) | Same date, debentures, spread, surface and settled closes; only the option spot moves. A blank assumed level uses the desk spot, and then Expected equals Current |
-| Scenario Grid | 21 full unwinds at S0 + k × 100 for k = −10 … +10 | S0 is the unrounded desk spot. The k = 0 row is the on-screen result. Changes are each level less k = 0, rupees to the paisa |
+| Observation dates | The product's unique Option Expiry Dates | The first is the Observation Start Date, the last the Observation End Date |
+| Passed | Date on or before the valuation date | Same rule that settles expired options |
+| Index close | Close on or before each passed date | The Yahoo closes the unwind settles expired options at; one fetch serves both |
+| Average So Far | Σ passed closes ÷ Observations Passed | "-" while a passed close is missing |
+| Pending Observations | Upcoming observation months, e.g. "Jul-26, Oct-26" or "Nov-26, Dec-26 & Jan-27" | Workbook Summary C |
+| Actual Target | Target Nifty on the New Primary product master; else the highest strike among the originally sold Puts | Baked into `lib/data/am-targets-seed.json` by `npm run bake:am-targets`. Sensex rows carry their Sensex-scale target in the same field |
+| Effective Target | (Actual Target × Total − Σ passed closes) ÷ Observations Left | Equals the Actual Target before the first observation; "-" when nothing is left or a passed close is missing |
+| Bid Ask spread s | By the leg's expiry: 0.75 volatility points through 31-Mar-2027, 0.5 through 31-Mar-2028, 0.375 through 31-Mar-2029, 0.25 through 31-Mar-2030, then 0.075 | `lib/data/bid-ask-seed.json`. An option originally sold is unwound at surface volatility + s, one originally bought at surface volatility − s, as in the workbook's pricing sheet. Expired legs take none |
+| Exit Value | Book unwind value with the side marks, plus simple interest at the premium discount rate on settled option cash from each expiry to the valuation date | Workbook Calculator BH with its AZ term. The Unwinding tabs keep their own Unwind Value, which has no carry term |
+| Current Internal Rate of Return | min(rate on Exit Value ÷ debentures over the invested days, Product Internal Rate of Return) at today's spot | Workbook Summary G. "-" when invested days are 0 or the book quote is at or below zero |
+| Expected Level | The Nifty or Sensex Spot Level edited on the Unwinding Calculator; today's spot otherwise | There is no separate assumed-level input. An edit re-prices the book's Expected figures after a short pause |
+| Expected Internal Rate of Return | Current IRR's formula at the Expected Level | Full re-price, not the workbook's delta shortcut. It equals Current IRR at today's spot |
+| Expected Difference | Assets at maturity + settled option cash carried to maturity + open option cash carried to maturity − Face × (1 + Coupon) × Debentures | See below. At the Expected Level |
+| Max rate | (1 + Coupon)^(365 ÷ Tenor Days) − 1 | Identical to Product Internal Rate of Return; zero coupon or tenor means no cap |
+| Client and Residual Internal Rate of Return | Unwinding's own rates, shown no higher than Product Internal Rate of Return | On the Product Book, the Unwinding Calculator's first tab and both page downloads; a product with no Product IRR (coupon or tenor 0) is shown as it is |
 
-Unlike the reference workbook, Expected Internal Rate of Return reprices the book instead of
-using a delta shortcut, and it reads the assumed level the desk typed rather than a fixed
-25,000. Expired options keep their settled closes at every level.
+### Expected Difference at maturity
 
-## Home — Product Book
+All amounts are carried to the maturity date T. g(r, d) = (1 + r)^(d ÷ 365).
 
-- **Eleven columns** after Premium Outflow Amount: Current Internal Rate of Return, Expected
-  Internal Rate of Return at Assumed Level, Actual Target, Effective Target, Observations
-  Passed, Observations Left, Observation Start Date, Observation End Date, Next Observation
-  Date, Average So Far, Observation Status. One value per product, merged across its leg rows,
-  in both Excel downloads as numbers and dates.
-- **Observation progress tabs** under the observation tabs: All Products, No Observation
-  Passed, At Least One Observation Passed, each with a count. They filter inside the active
-  observation tab, search and revealed date window, and Export View follows them.
-- **Assumed Nifty Level and Assumed Sensex Level** with Apply and Reset To Desk Level.
-  Placeholders show the desk levels. Apply re-prices the whole book (two unwinds per product);
-  until a product is re-priced its Expected cell shows "…" and the downloads wait.
-- Status values: No Observations, Not Started, Observations Live, Observations Done.
+```
+Margin now     M = Total Funds For Margin × g(Margin Funding Rate, invested days)
+Assets at T      = (NBFC Grown Value − M) × g(Product Discount Rate, residual days)
+                 + M × g(Margin Funding Rate, residual days)
+                 + Premium Grown Value × g(Premium Discount Rate, residual days)
+Settled at T     = Σ expired legs: premium outflow × g(Premium Discount Rate, T − expiry)
+Open at T        = Σ live legs: mid premium outflow × e^(q·τ) × g(Premium Discount Rate, T − expiry)
+                   q = Forward Sell Rate + 1%, τ = years to the leg's expiry
+Expected Difference = Assets at T + Settled at T + Open at T − Face × (1 + Coupon) × Debentures
+```
 
-## Unwinding Calculator — three extra tabs
+Why each term:
+- **Assets.** Each pool grows at its own rate, the way the Unwinding economics grow it to today.
+- **Settled cash.** Payouts already made leave the premium pool, so they are carried at the premium rate.
+- **Open legs.** These use mid prices: nothing is unwound at maturity, so no spread applies. Each mid is the discounted expected payoff at its expiry, so it is undone with e^(q·τ) and then carried the same way.
+- **What the result means.** The assets are sized to grow to the full-coupon redemption, so Expected Difference is, in effect, the option book's cash at maturity. It shows how far the book is expected to fall short of (negative) or exceed the full-coupon payout.
 
-All three use the page's own inputs and the exact unwind already on screen.
+## Home
+
+**Product Book.** Fifteen columns follow the Unwinding columns:
+- Current Internal Rate of Return, Expected Internal Rate of Return
+- Expected Difference, Exit Value, Mobilization
+- Actual Target, Effective Target
+- Observations Passed, Observations Left, Pending Observations
+- Observation Start Date, Observation End Date, Next Observation Date
+- Average So Far, Observation Status
+
+They are one value per product, merged across its leg rows on screen and in both Excel downloads. Expected cells show "…" until they are re-priced at a new Expected Level.
+
+**Totals strip.** Total Mobilization, Total Exit Value and Total Expected Difference for the products shown, each product counted once.
+
+**Tabs.**
+- Observation progress tabs: All Products, No Observation Passed, At Least One Observation Passed, with counts.
+- They sit under the observation tabs (Ongoing, Observation in 3, 2 and 1 Month) and work with the search and the Reveal window (Start Date and End Date).
+
+**Desk Book.** A Bid Ask Spread tab shows each surface expiry with its spread and the bucket schedule.
+
+**Scenario Table.** It sits below Post Observation Analytics.
+- Rows are products. The columns are the 21 index levels from −1,000 to +1,000 points around today's spot, in steps of 100.
+- It has the Product Book's own filters, built from the same functions.
+- Measure tabs: Unwind Quote Amount, Premium Outflow, Unwind Value, Current Internal Rate of Return and Expected Difference, each with a Change In tab measured against the 0 column.
+- Load Scenario Table prices the rows on screen first. Clicking a row opens the product.
+- Export View and Export Workbook write one sheet per measure.
+
+## Unwinding Calculator
+
+Three tabs follow the original five, all priced on the exact unwind on screen.
 
 | Tab | Contents | Downloads |
 |-----|----------|-----------|
-| Active Management | Targets (Actual Target, source, Effective Target), Observations, the rates including Expected at the assumed level, warnings, and the Observation Schedule (date, Passed or Upcoming, Index Close, Provisional) | `SP-Active-Management-{code}-{date}.xlsx` / `.pdf` |
-| Black Scholes Pricer | The Pricer Table's 14 columns for this product, then Original Buy or Sell, Unwind Buy or Sell, Unwind Quantity, Unwind Option Price, Premium Outflow Amount, Settlement Fixing | `SP-Black-Scholes-Pricer-{code}-{date}.xlsx` / `.pdf` |
-| Scenario Grid | 21 rows from −1,000 to +1,000 points: Index Level, Unwind Quote Amount, Unwind Quote Percent, Premium Outflow, Unwind Value, Client, Current and Residual rates, each with its change from the centre row | `SP-Scenario-Grid-{code}-{date}.xlsx` / `.pdf` |
+| Active Management | **Targets:** Actual Target and its source, Effective Target. **Observations:** totals, Pending Observations, dates, Average So Far, status. **Rates and values:** Current and Expected Internal Rate of Return, Expected Difference, Exit Value, Current Level, Expected Level. Then warnings and the Observation Schedule | `SP-Active-Management-{code}-{date}` |
+| Pricer Table | The 14 pricer columns for this product, then Original Buy or Sell, Unwind Buy or Sell, Unwind Quantity, Unwind Option Price, Premium Outflow Amount, Settlement Fixing. Bid Offer Spread shows each leg's 2s, so a live leg reads Sell < Mid < Buy | `SP-Pricer-Table-{code}-{date}` |
+| Scenario Grid | 21 rows from −1,000 to +1,000 points: Index Level, Unwind Quote Amount, Unwind Quote Percent, Premium Outflow, Unwind Value, Current Internal Rate of Return and Expected Difference, each with its change from the centre row | `SP-Scenario-Grid-{code}-{date}` |
 
-The grid is priced when its tab opens, one level at a time so the page stays responsive, and
-is remembered for that unwind. A product whose options have all expired has a flat grid.
-The page's own Download Excel and Download PDF are unchanged and do not include these tabs.
+- **Separate Pricer page:** there is none now. The Pricer Table is this tab (`/portfolio/unwinding?tab=pricer`).
+- **Bid Ask Spread input:** blank uses the Bid Ask table. A number is one flat spread for every leg, and 0 reproduces the Unwinding Calculator's prices.
+- **Page downloads:** the page's own Download Excel and Download PDF now add the three tabs after the original content.
 
-## Speed
+## Engine changes against the Unwinding Calculator
 
-`normalizeVolSurface` keeps one normalised copy per surface object (a `WeakMap`). This is the
-one engine edit in this repository and is not in the Unwinding Calculator. It cut a whole-book
-pass from 72 s to 0.9 s on a loaded machine, with no change in any of 6,537 hashed results
-(2,179 unwinds, 2,179 unwinds at +500, 2,179 pricer tables). Surfaces must therefore be
-treated as read-only once normalised; every caller already copies before editing.
+These are the only places this repository's engine differs from its twin:
+
+1. **Vol surface memo.** `normalizeVolSurface` keeps one normalised copy per surface object. A whole-book pass went from 72 s to 0.9 s, with identical results across 6,537 hashed checks.
+2. **Per-leg Bid Ask.** `bidAskSpread` of `null` means the table. An explicit number behaves exactly as before; every explicit-0 price is byte-identical.
+3. **Headline premium cell.** It uses the absolute number of spreads, so a sold leg stored with a negative count is no longer double-negated. This moved 108 live headline quotes, for example NA-866's Client IRR, which had read 79.95%. Golden tests are unchanged.
+
+## Effect of the Bid Ask table
+
+On the live book on 9-Nov-2026, the table made every Premium Outflow move against the desk:
+- **Premium Outflow:** median −17.3% of mobilisation, 90th percentile −36.5%.
+- **Active Management Current Internal Rate of Return:** median −8.2 points.
+
+These books hold tight put spreads, and both legs move against the desk. This is the workbook's own rule, reproduced on 346 of 346 workbook products. Typing 0 in Bid Ask Spread shows a product without it.
 
 ## Checks
 
-`npm run verify:am` (offline, in `npm run verify` and CI) covers:
-
-- observation counts against Unwinding's own helpers on every live product;
-- Effective Target against workbook Calculator rows;
-- Max rate equal to Product Internal Rate of Return;
-- grid centre equal to the unwind, expired cash fixed across levels, a Sensex shift, and a
-  missing closes map throwing;
-- pricer rows aligned with the Options Book;
-- the target seed (715 → 24,920 and 740 → 22,211 from the product master, and 150 of 150 workbook
-  targets);
-- Expected equal to Current at the desk spot on every live product.
+- **`npm run verify:am`:**
+  - observation counts, targets, Pending Observations text;
+  - the Bid Ask buckets and Sell < Mid < Buy;
+  - explicit-0 parity, Exit Value and AZ, the book-quote IRRs, Expected Difference;
+  - the grid centre and expired cash, a Sensex shift;
+  - the scenarios route.
+- **`npm run verify:tally`:** the workbook reconciliation on a compact fixture, `scripts/fixtures/workbook-tally.json`.
+  - Side volatilities and option marks 3,043 of 3,043.
+  - Unwind IRR within 1 basis point on 346 of 346.
+  - Actual Target 127 of 127, Effective Target 80 of 81.
+  - Expected Difference worked examples 3 of 3.
 
 ## Known master-data gaps (not changed here)
 
-- 369 live products are not on the New Primary master (DMF series, newer series, some Sensex
-  series) and use the top Sell Put strike as Actual Target.
-- Product 715 has a stray 30-Apr-2026 leg, so it shows four observations where the workbook
-  has three.
-- Magnifier 319 and 320 Phase II are missing two observation dates in the master.
+- **Targets.** 369 live products are not on the New Primary master and use the top Sell Put strike as Actual Target.
+- **Product 715** has a stray 30-Apr-2026 leg: four observations where the workbook has three.
+- **Magnifier 319 and 320 Phase II** are missing two observation dates.
+- **Product 1624** has a spread count of 92. Gearing Accelerator 40 and Nifty Accelerator 956 still show a headline quote that differs from the book quote.

@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { parseVolSurfaceWorkbook } from "../lib/workbook/parsers";
 import { volSurfaceSampleFileName } from "../lib/workbook/upload-schema";
@@ -6,9 +8,8 @@ import { formatDeskDate, formatDeskDateFull } from "../lib/utils";
 import volSeed from "../lib/data/vol-surface-seed.json";
 import type { VolSurface } from "../lib/types";
 
-/** October 2026 seed from Vol Surface for Oct26.xlsx. */
+/** November 2026 seed from Final Surface Nov 26.xlsx. */
 const LIVE_EXPIRIES = [
-  "27-Oct-26",
   "23-Nov-26",
   "29-Dec-26",
   "30-Mar-27",
@@ -17,15 +18,16 @@ const LIVE_EXPIRIES = [
   "28-Dec-27",
   "28-Mar-28",
   "27-Jun-28",
+  "26-Sep-28",
   "26-Dec-28",
   "26-Jun-29",
   "24-Dec-29",
   "29-Dec-30",
   "26-Mar-31",
 ];
-const MONTH_KEY = "2026-10";
-const REFERENCE_NIFTY = 22421.95;
-const REFERENCE_SENSEX = 71909.7;
+const MONTH_KEY = "2026-11";
+const REFERENCE_NIFTY = 23053.1;
+const REFERENCE_SENSEX = 74459.53;
 
 function assert(label: string, ok: boolean, detail?: string) {
   console.log(`${ok ? "PASS" : "FAIL"} ${label}${detail ? `: ${detail}` : ""}`);
@@ -72,7 +74,7 @@ function checkSurface(label: string, surface: Pick<VolSurface, "expiries" | "vol
 
 async function maybeLive() {
   try {
-    const res = await fetch("http://localhost:3006/api/multi/dataset");
+    const res = await fetch(`${process.env.DESK_BASE_URL ?? "http://localhost:3006"}/api/multi/dataset`);
     if (!res.ok) return;
     const data = (await res.json()) as { surface?: VolSurface };
     if (data.surface) checkSurface("live /api/multi/dataset", data.surface);
@@ -89,13 +91,26 @@ async function main() {
   checkSurface("public seed json", publicSeed);
 
   const sampleName = volSurfaceSampleFileName();
-  assert("sample is named for the seed month", sampleName === "Vol_Surface_Input_October.xlsx", sampleName);
+  assert("sample is named for the seed month", sampleName === "Vol_Surface_Input_November.xlsx", sampleName);
   const sample = fs.readFileSync(`public/samples/${sampleName}`);
   checkSurface("sample workbook", parseVolSurfaceWorkbook(toBuffer(sample), MONTH_KEY));
 
+  // The desk's own file has no Deep column (dates sit just before 55%); it must parse to the seed.
+  const deskFile = path.join(os.homedir(), "Downloads", "Final Surface Nov 26.xlsx");
+  if (fs.existsSync(deskFile)) {
+    const parsed = parseVolSurfaceWorkbook(toBuffer(fs.readFileSync(deskFile)), MONTH_KEY);
+    checkSurface("desk file without a Deep column", parsed);
+    assert(
+      "desk file without a Deep column equals the seed grid",
+      JSON.stringify(parsed.volsPercent) === JSON.stringify(volSeed.volsPercent),
+    );
+  } else {
+    console.log("SKIP desk file: Final Surface Nov 26.xlsx not in Downloads");
+  }
+
   await maybeLive();
   if (process.exitCode) process.exit(process.exitCode);
-  console.log("All October vol surface checks passed.");
+  console.log("All November vol surface checks passed.");
 }
 
 main().catch((err) => {

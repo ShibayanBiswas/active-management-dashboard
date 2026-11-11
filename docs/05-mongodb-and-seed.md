@@ -78,7 +78,7 @@ Copy `.env.example` to `.env.local` (never commit `.env.local`):
 | `MONGODB_DB` | `active_management` |
 
 The surface month comes from the seeded / uploaded Volatility Surface (`monthKey`,
-currently `2026-10`), not from an environment variable.
+currently `2026-11`), not from an environment variable.
 
 Production on Vercel uses the same two names. Exact paste values and Atlas IP steps:
 [09 Vercel deploy](09-vercel-deploy.md).
@@ -93,18 +93,18 @@ npm run bake             # rebuild product-master + golden-parity JSON (vol seed
 npm run collate:multi    # rebuild multi-products-seed.json from FY21–FY27 XLSM (+ persist multi_products)
 npm run build:samples    # rebuild public/samples/*.xlsx (repeated-rows multi sample is gitignored)
 npm run ensure:repeated-sample  # build Repeated Rows only when missing (also runs before `next build` on Vercel)
-npm run seed             # upsert October surface and Nifty Accelerator - 961
+npm run seed             # upsert November surface and Nifty Accelerator - 961
 ```
 
 What `npm run seed` writes (`scripts/seed-mongo.ts`):
 
-1. **October 2026** Volatility Surface marked `isActive: true` (`monthKey` `2026-10`).
+1. **November 2026** Volatility Surface marked `isActive: true` (`monthKey` `2026-11`).
    - Volatility Bump 0.00%
    - Forward Sell Rate 6.60%
-   - Reference Nifty Price 22,421.95 and Reference Sensex Price 71,909.70 (100% Strike Change anchors as of **1 Oct 2026**)
+   - Reference Nifty Price 23,053.10 and Reference Sensex Price 74,459.53 (100% Strike Change anchors as of **1 Nov 2026**, the 30 Oct closes)
    - Deep Strike hardcoded ₹500, carrying the 55% vols
    - Strike Change percents only (no absolute strike row)
-   - 21 strike columns × 14 live expiries (27-Oct-2026 → 26-Mar-2031)
+   - 21 strike columns × 14 live expiries (23-Nov-2026 → 26-Mar-2031)
 2. Product Master **Nifty Accelerator - 961** / ARG24SP06 Series I marked `isActive: true`.
    - All 28 input-workbook columns (product facts including Contingent Level and Margin Cost + option legs)
    - 24 legs with per-leg `prdPrice`, `sdCode`, `qtyDivisor`, `reqQuantity`
@@ -126,8 +126,8 @@ If Mongo is unreachable the seed script exits with code 1 and prints
 `MongoDB unavailable — check MONGODB_URI`.
 
 The surface year is **not** hardcoded in the product bake. `scripts/bake-seeds.ts` rebuilds
-the product master and golden parity. The file on disk is the **October 2026** grid
-(`monthKey` `2026-10` in the seed, baked by `npm run bake:vol -- "<surface.xlsx>" 2026-10`) until a
+the product master and golden parity. The file on disk is the **November 2026** grid
+(`monthKey` `2026-11` in the seed, baked by `npm run bake:vol -- "<surface.xlsx>" 2026-11`) until a
 new month is baked or uploaded. On the desk,
 if that month has no upload, the previous grid continues under the **current** calendar
 month name, and Reference Nifty / Sensex become the Yahoo close on the first session of
@@ -170,7 +170,7 @@ in [doc 02](02-calculation-logic.md) and [doc 03](03-pricer-logic.md).
 | File | Role |
 |------|------|
 | `lib/data/product-master-seed.json` | Nifty Accelerator - 961, the engine golden fixture for the verify scripts (not loaded by the app) |
-| `lib/data/vol-surface-seed.json` | October 2026 grid, Reference Nifty 22,421.95, Reference Sensex 71,909.70 as of 1 Oct 2026, Forward Sell Rate 6.60%, 14 live expiries, Deep = 55% |
+| `lib/data/vol-surface-seed.json` | November 2026 grid, Reference Nifty 23,053.10, Reference Sensex 74,459.53 as of 1 Nov 2026 (30 Oct closes), Forward Sell Rate 6.60%, 14 live expiries, Deep = 55% |
 | `lib/data/vol-surface-golden-sep-2026.json` | Frozen September 2026 grid for the golden parity / pricer locks |
 | `lib/data/multi-products-seed.json` | 2,505 products / 79,190 live legs |
 | `lib/data/golden-parity.json` | Reference-book headline numbers for `verify:parity` |

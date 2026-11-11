@@ -1,3 +1,4 @@
+import { bidAskSpreadPercent } from "@/lib/active-management/bid-ask";
 import { blackScholesDelta, blackScholesPrice } from "@/lib/engine/black-scholes";
 import { surfaceVolDecimal } from "@/lib/engine/vol-surface";
 import type { OptionLeg, PricerRow, ProductMaster, UnderlyingIndex, VolSurface } from "@/lib/types";
@@ -17,7 +18,9 @@ export function optionCode(kind: string, expiry: Date, strike: number): string {
 /**
  * Price one option leg for a pricer row.
  * The discount yield is the leg's Forward Sell Rate plus one percent (pricer convention).
- * bidAskSpread z (default 0): Sell price uses σ − z/2, Buy price uses σ + z/2.
+ * bidAskSpread z: Sell price uses σ − z/2, Buy price uses σ + z/2. null or undefined takes the
+ * Bid Ask table, z = 2 × s(expiry) ÷ 100, so Sell is σ − s and Buy is σ + s (workbook Px. Comput K).
+ * 0 is no spread.
  *
  * Expired legs (τ ≤ 0, including expiries absent from the live vol surface): Price, Sell
  * and Buy are 0. Excel’s Black–Scholes cell errors once time has run out, and the Main
@@ -29,11 +32,11 @@ export function priceLeg(args: {
   spot: number;
   valuationDate: Date;
   surface: VolSurface;
-  bidAskSpread?: number;
+  bidAskSpread?: number | null;
   underlying?: UnderlyingIndex;
 }): PricerRow {
   const { leg, spot, valuationDate, surface } = args;
-  const bidAsk = args.bidAskSpread ?? 0;
+  const bidAsk = args.bidAskSpread ?? (2 * bidAskSpreadPercent(leg.expiry)) / 100;
   const maturity = parseISODate(leg.expiry);
   const tauDays = daysBetween(valuationDate, maturity);
   const tauYears = tauDays / 365;
@@ -119,7 +122,8 @@ export function priceProductBook(args: {
   spot: number;
   valuationDate: string;
   surface: VolSurface;
-  bidAskSpread?: number;
+  /** As priceLeg: null or undefined takes the Bid Ask table per leg; a number is a flat z. */
+  bidAskSpread?: number | null;
   underlying?: UnderlyingIndex;
 }): PricerRow[] {
   const vd = parseISODate(args.valuationDate);

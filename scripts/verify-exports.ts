@@ -1,7 +1,7 @@
 /**
  * Locks desk export layout: Options Book PDF clubs same-value cells inside each
- * strike group without opening a header-only blank page, and Excel workbooks
- * contain only the sheets we add.
+ * strike group without opening a header-only blank page, and the Unwinding
+ * Calculator's workbook and PDF contain only the sheets and sections we add.
  */
 import ExcelJS from "exceljs";
 import { jsPDF } from "jspdf";
@@ -10,10 +10,16 @@ import autoTable from "jspdf-autotable";
 import { spannedPdfBody } from "../lib/workbook/pdf-table";
 import { OPTION_BOOK_MERGE_COLS, PRICER_MERGE_COLS } from "../lib/workbook/table-merge";
 import { computeGroupedRowSpans, formatDeskDate, formatNumber, formatPct } from "../lib/utils";
+import { scenarioGrid } from "../lib/active-management/scenario";
+import { collectExpiredLegExpiryDates } from "../lib/engine/expiry-spots";
 import { priceProductBook } from "../lib/engine/pricer";
+import { computeUnwind } from "../lib/engine/unwind";
+import { normalizeVolSurface } from "../lib/engine/vol-surface";
+import { activeManagementTab, productPricerTab, scenarioGridTab } from "../lib/workbook/am-export-columns";
+import { buildUnwindPageWorkbook, buildUnwindScreenPdf } from "../lib/workbook/export-screen";
 import productSeed from "../lib/data/product-master-seed.json";
 import volSeed from "../lib/data/vol-surface-seed.json";
-import type { ProductMaster, VolSurface } from "../lib/types";
+import type { ProductMaster, UnwindInputs, VolSurface } from "../lib/types";
 
 let failures = 0;
 function assert(label: string, ok: boolean, detail?: string) {
@@ -149,24 +155,81 @@ assert(
 );
 assert("first PDF page carries table body", pages === 1 || finalY > 40, `pages=${pages}`);
 
-const unwindPdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
-unwindPdf.text("Unwinding Calculator", 14, 20);
-assert("main unwind PDF stays portrait without an Options Book page", unwindPdf.getNumberOfPages() === 1);
+/**
+ * The Unwinding Calculator's own Download Excel and Download PDF, built by the real builders: the
+ * five summary tabs as before, then Active Management, Pricer Table and Scenario Grid.
+ */
+async function pageDownloads() {
+  const product = productSeed as ProductMaster;
+  const surface = normalizeVolSurface(volSeed as VolSurface);
+  const spot = 24435.95;
+  const inputs: UnwindInputs = {
+    debentures: Math.round(product.mobilization / product.faceValue),
+    unwindDate: "2026-08-13",
+    spot,
+    underlying: "Nifty",
+    nifty: spot,
+    sensex: null,
+    bidAskSpread: null,
+    expirySpots: Object.fromEntries(collectExpiredLegExpiryDates(product, "2026-08-13").map((day) => [day, spot])),
+  };
+  const result = computeUnwind({ product, surface, inputs });
+  const basis = { product, surface, inputs, result };
+  const tabs = [
+    activeManagementTab({ ...basis, actualTarget: null, actualTargetSource: null, deskLevels: { nifty: spot, sensex: null } }).doc,
+    productPricerTab(basis).doc,
+    scenarioGridTab(scenarioGrid({ product, surface, inputs, baseResult: result })).doc,
+  ];
+  const names = (wb: ExcelJS.Workbook) => wb.worksheets.map((ws) => ws.name).join(", ");
 
-const wb = new ExcelJS.Workbook();
-const summary = wb.addWorksheet("Unwinding Summary");
-summary.getCell("A1").value = "Unwind";
-const book = wb.addWorksheet("Options Book");
-book.getCell("A1").value = "Marks";
-assert("unwind workbook has exactly two sheets", wb.worksheets.length === 2, String(wb.worksheets.length));
-assert("no default blank sheet", wb.worksheets.every((ws) => ws.name !== "Sheet1"), wb.worksheets.map((ws) => ws.name).join(","));
+  const before = await buildUnwindPageWorkbook(result, []);
+  assert("unwind workbook without tabs keeps exactly its two sheets", names(before) === "Unwinding Summary, Options Book", names(before));
+  const page = await buildUnwindPageWorkbook(result, tabs);
+  assert(
+    "unwind workbook adds Active Management, Pricer Table and Scenario Grid after them",
+    names(page) === "Unwinding Summary, Options Book, Active Management, Pricer Table, Scenario Grid",
+    names(page),
+  );
+  assert("no default blank sheet", page.worksheets.every((ws) => ws.name !== "Sheet1"), names(page));
+  const cellsOf = (name: string) => {
+    const out: string[] = [];
+    page.getWorksheet(name)?.eachRow((row) => row.eachCell((cell) => out.push(String(cell.value ?? ""))));
+    return out;
+  };
+  assert("Active Management sheet has its rates", cellsOf("Active Management").includes("Expected Internal Rate of Return"));
+  assert("Pricer Table sheet has its headers", cellsOf("Pricer Table").includes("Bid Offer Spread"));
+  assert("Scenario Grid sheet has Expected Difference", cellsOf("Scenario Grid").includes("Change In Expected Difference"));
 
-const pricer = new ExcelJS.Workbook();
-pricer.addWorksheet("Pricer Table").getCell("A1").value = "Pricer";
-assert("pricer workbook has exactly one sheet", pricer.worksheets.length === 1, String(pricer.worksheets.length));
-
-if (failures > 0) {
-  console.error(`\nExport checks FAILED (${failures})`);
-  process.exit(1);
+  const orientations = (doc: jsPDF) =>
+    Array.from({ length: doc.getNumberOfPages() }, (_, i) => {
+      doc.setPage(i + 1);
+      return doc.internal.pageSize.getWidth() > doc.internal.pageSize.getHeight() ? "L" : "P";
+    }).join("");
+  const basePdf = (await buildUnwindScreenPdf(result, [])).finish();
+  const pagePdf = (await buildUnwindScreenPdf(result, tabs)).finish();
+  const baseShape = orientations(basePdf);
+  const pageShape = orientations(pagePdf);
+  assert("unwind PDF without tabs stays portrait", /^P+$/.test(baseShape), baseShape);
+  assert(
+    "unwind PDF keeps its portrait pages, then Active Management portrait, then the two tables landscape",
+    pageShape.startsWith(baseShape) && /^P+L+$/.test(pageShape),
+    pageShape,
+  );
+  const text = pagePdf.output();
+  assert(
+    "unwind PDF carries the three tab banners",
+    ["(Active Management)", "(Pricer Table)", "(Scenario Grid)"].every((t) => text.includes(t)),
+  );
 }
-console.log("\nExport checks PASSED");
+
+void pageDownloads()
+  .catch((e: unknown) => {
+    assert("page downloads build", false, e instanceof Error ? e.message : String(e));
+  })
+  .finally(() => {
+    if (failures > 0) {
+      console.error(`\nExport checks FAILED (${failures})`);
+      process.exit(1);
+    }
+    console.log("\nExport checks PASSED");
+  });

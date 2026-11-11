@@ -2,6 +2,7 @@ import type { ActiveManagementQuote } from "@/lib/active-management/book-row";
 import type { OptionLeg, OptionTableRow, ProductMaster, UnwindResult } from "@/lib/types";
 import type { ExcelCell } from "@/lib/workbook/excel-cells";
 import {
+  capAtProductIrr,
   daysBetween,
   blankRepeatedDisplay,
   formatDeskDate,
@@ -85,8 +86,8 @@ export function quoteViewFromUnwind(result: UnwindResult, asOf: string): Product
   return {
     quoteRs: result.unwindQuoteRs,
     productIRR: result.productIRR,
-    clientIRR: result.clientIRR,
-    residualIRR: result.residualIRR,
+    clientIRR: capAtProductIrr(result.clientIRR, result.productIRR),
+    residualIRR: capAtProductIrr(result.residualIRR, result.productIRR),
     premiumOutflowRs: result.masterEconomics.premiumOutflowRs,
     asOf,
     economics: {
@@ -184,19 +185,25 @@ function staticAmount(leg: OptionLeg, product: ProductMaster): number {
 
 /**
  * Active Management cells, in ACTIVE_MANAGEMENT_BOOK_HEADERS order. "…" while the quote is pending,
- * "-" when it has no Active Management fields. expectedPending: priced at other assumed levels, re-quote running.
+ * "-" when it has no Active Management fields. expectedPending: priced at other expected levels, re-quote running.
+ * Mobilization is a master fact, so it shows whatever the quote's state.
  */
-function activeManagementCells(quote: ProductBookRowQuote | null, expectedPending = false): string[] {
-  if (quote == null) return ACTIVE_MANAGEMENT_BOOK_HEADERS.map(() => "…");
+function activeManagementCells(product: ProductMaster, quote: ProductBookRowQuote | null, expectedPending = false): string[] {
+  const mobilization = formatDeskRupees(product.mobilization);
+  if (quote == null) return ACTIVE_MANAGEMENT_BOOK_HEADERS.map((h) => (h === "Mobilization" ? mobilization : "…"));
   const am = quote.am;
-  if (!am) return ACTIVE_MANAGEMENT_BOOK_HEADERS.map(() => "-");
+  if (!am) return ACTIVE_MANAGEMENT_BOOK_HEADERS.map((h) => (h === "Mobilization" ? mobilization : "-"));
   return [
     formatPct(am.currentIrr),
     expectedPending ? "…" : formatPct(am.expectedIrr),
+    expectedPending ? "…" : formatDeskRupees(am.expectedDifferenceRs),
+    formatDeskRupees(am.exitValueRs),
+    mobilization,
     formatNumber(am.actualTarget, 2),
     formatNumber(am.effectiveTarget, 2),
     formatNumber(am.observationsPassed, 0),
     formatNumber(am.observationsLeft, 0),
+    am.pendingObservations?.trim() || "-",
     formatDeskDate(am.observationStartDate),
     formatDeskDate(am.observationEndDate),
     formatDeskDate(am.nextObservationDate),
@@ -232,7 +239,7 @@ export function buildProductBookMatrix(args: {
     ...facts,
   ];
 
-  const activeManagement = activeManagementCells(args.quote, args.expectedPending);
+  const activeManagement = activeManagementCells(args.product, args.quote, args.expectedPending);
 
   const source = legs.length ? legs : [null];
   const rows = source.map((leg, index) => {
@@ -276,17 +283,22 @@ function excelNumber(value: number | null | undefined): ExcelCell {
   return value == null || !Number.isFinite(value) ? "-" : value;
 }
 
-/** Active Management download cells, in ACTIVE_MANAGEMENT_BOOK_HEADERS order. */
-function activeManagementExcelCells(quote: ProductBookRowQuote | null): ExcelCell[] {
+/** Active Management download cells, in ACTIVE_MANAGEMENT_BOOK_HEADERS order. Mobilization always exports. */
+function activeManagementExcelCells(product: ProductMaster, quote: ProductBookRowQuote | null): ExcelCell[] {
+  const mobilization = excelNumber(product.mobilization);
   const am = quote?.am;
-  if (!am) return ACTIVE_MANAGEMENT_BOOK_HEADERS.map(() => "-");
+  if (!am) return ACTIVE_MANAGEMENT_BOOK_HEADERS.map((h) => (h === "Mobilization" ? mobilization : "-"));
   return [
     excelNumber(am.currentIrr),
     excelNumber(am.expectedIrr),
+    excelNumber(am.expectedDifferenceRs),
+    excelNumber(am.exitValueRs),
+    mobilization,
     excelNumber(am.actualTarget),
     excelNumber(am.effectiveTarget),
     excelNumber(am.observationsPassed),
     excelNumber(am.observationsLeft),
+    am.pendingObservations?.trim() || "-",
     excelDate(am.observationStartDate ?? ""),
     excelDate(am.observationEndDate ?? ""),
     excelDate(am.nextObservationDate ?? ""),
@@ -335,7 +347,7 @@ export function buildProductBookExcelMatrix(args: {
     invested,
     residual,
   ];
-  const activeManagement = activeManagementExcelCells(args.quote);
+  const activeManagement = activeManagementExcelCells(args.product, args.quote);
   const source = legs.length ? legs : [null];
   return source.map((leg, index) => {
     const mark = args.quote?.legs[index];
