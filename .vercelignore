@@ -7,5 +7,3 @@ logs/
 reports/
 test-results/
 .playwright-mcp/
-# Verify-only workbook tally fixture; the deployed app never reads it
-scripts/fixtures/

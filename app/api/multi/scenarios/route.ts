@@ -30,11 +30,8 @@ export async function GET() {
  * fails, or a key not in the book, is null.
  */
 export async function POST(req: Request) {
-  const body = (await req.json().catch(() => null)) as {
-    keys?: string[];
-    /** Optional client book slice — prices uploads before / without Mongo sync. */
-    products?: ProductMaster[];
-  } | null;
+  // Keys only: products always come from the desk's own book, never from the request body.
+  const body = (await req.json().catch(() => null)) as { keys?: string[] } | null;
   const keys = [...new Set((body?.keys ?? []).filter((key) => typeof key === "string" && key.length > 0))];
   if (!keys.length) {
     return NextResponse.json(
@@ -48,9 +45,6 @@ export async function POST(req: Request) {
       { status: 400, headers: NO_STORE },
     );
   }
-  const clientProducts = Array.isArray(body?.products)
-    ? body!.products!.filter((p): p is ProductMaster => Boolean(p && typeof p === "object"))
-    : [];
   const unwindDate = deskTodayISO();
   let loaded: [Awaited<ReturnType<typeof loadMultiDesk>>, Awaited<ReturnType<typeof resolveDeskSpots>>];
   try {
@@ -60,7 +54,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: message }, { status: 502, headers: NO_STORE });
   }
   const [{ products, surface }, desk] = loaded;
-  const byKey = new Map((clientProducts.length ? clientProducts : products).map((product) => [productKey(product), product]));
+  const byKey = new Map(products.map((product) => [productKey(product), product]));
   const slice = keys.map((key) => byKey.get(key)).filter((p): p is ProductMaster => Boolean(p));
 
   const priced = await bookScenarioRows({

@@ -125,10 +125,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  // Keys only: products always come from the desk's own book, never from the request body.
   const body = (await req.json().catch(() => null)) as {
     keys?: string[];
-    /** Optional client book slice — prices uploads before / without Mongo sync. */
-    products?: ProductMaster[];
     /** Optional Expected IRR levels; anything but a finite positive number means the desk spot. */
     assumed?: { nifty?: number | null; sensex?: number | null };
   } | null;
@@ -146,9 +145,6 @@ export async function POST(req: Request) {
     );
   }
   const keySet = new Set(keys);
-  const clientProducts = Array.isArray(body?.products)
-    ? body!.products!.filter((p): p is ProductMaster => Boolean(p && typeof p === "object"))
-    : [];
   const assumed: AssumedLevels = {
     nifty: assumedLevel(body?.assumed?.nifty),
     sensex: assumedLevel(body?.assumed?.sensex),
@@ -163,13 +159,7 @@ export async function POST(req: Request) {
   }
   const [{ products, surface }, desk] = loaded;
 
-  let slice: ProductMaster[];
-  if (clientProducts.length) {
-    const byKey = new Map(clientProducts.map((product) => [productKey(product), product]));
-    slice = keys.map((key) => byKey.get(key)).filter((p): p is ProductMaster => Boolean(p));
-  } else {
-    slice = products.filter((product) => keySet.has(productKey(product)));
-  }
+  const slice = products.filter((product) => keySet.has(productKey(product)));
 
   return NextResponse.json(
     {
