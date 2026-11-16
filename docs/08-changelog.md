@@ -4,6 +4,43 @@ Newest first. Each entry lists what changed, why, and where. Historical notes ar
 they were written on that day (a later entry may restyle something an earlier entry
 introduced).
 
+## 2026-11-16 — Totals strip without Expected Difference, whole-issue Active Management figures, Premium Outflow card states
+
+The owner asked for the Total Expected Difference card to be removed, and for Premium Outflow,
+Total Mobilization and Total Exit Value to be checked. All four were checked against the Active
+Management workbook (Summary, Calculator, List of Products) and the five Unwinding workbooks.
+
+**Removed.** The Total Expected Difference card. The strip keeps Total Mobilization (Summary I1)
+and Total Exit Value (Summary J1).
+- On 16-Nov-2026 the card read ₹−14,493 crore on all 2,174 products, and ₹−594.8 crore on At
+  Least One Observation Passed.
+- That is the sum of each product's shortfall against its maximum redemption, not a unit error.
+  [11](11-active-management.md) shows the figures.
+- The Expected Difference column stays, on the Product Book and in Post Observation Analytics.
+
+**Checked and unchanged:**
+- **Total Mobilization:** List of Products E, once per product.
+- **Exit Value:** Calculator BH = F + H + J + K, in rupees for the whole issue. Summary J divides
+  it by 1,00,00,000 for crore.
+- **Premium Outflow card:** settled leg cash (List of Products AY) for expiries in the window.
+  - It matches AY on Nifty Accelerator 705 to the paisa.
+  - The app's expiry closes match the workbook's on all 23 dates both hold.
+
+**Fixed:**
+- **Product Book basis.** It is the whole issue, Mobilization ÷ Face Value, unrounded
+  (`wholeIssueDebentures`). The rounded count had sized option legs to 162 of Nifty
+  Accelerator 774's 161.6 debentures, to 3,188 of Gearing Accelerator 274's 3,187.5, and to
+  987 of Nifty Maximizer 56's 986.54.
+  - Total Exit Value moves from ₹2,36,54,97,29,443.68 to ₹2,36,54,98,23,587.53.
+- **Unwinding Calculator figures with typed debentures.** Exit Value, Current and Expected IRR
+  and Expected Difference now take option cash to the whole issue (`optionCashToWholeIssue`)
+  when the debentures typed on the Unwinding Calculator are not the whole issue.
+  - Before, 800 of Nifty Accelerator 1596's 4,000 debentures added a fifth of the option cash
+    to the whole issue's grown values.
+  - That gave Exit Value ₹68.57 crore against ₹27.56 crore, and Current IRR 15.0% against −33.2%.
+- **Premium Outflow card.** A quote that comes back without leg marks no longer holds the card on
+  `Pricing n / n`. That product is left out and counted as `Not Priced`.
+
 ## 2026-11-11 — November surface, Bid Ask table, Expected Difference and the Scenario Table
 
 **November 2026 Volatility Surface** (ported from Unwinding Calculator `5d2ab0e`):

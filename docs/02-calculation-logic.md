@@ -539,7 +539,8 @@ This app does not ship the Unwinding Calculator's single-product `POST /api/unwi
 Unwinding Calculator page runs `computeUnwind` in the browser on the selected product.
 Product Book marks come from `POST /api/multi/quotes` with `{ "keys": [productKey, …] }`
 (at most 64), which runs `computeUnwindWithExpirySpots` on the server with today's desk
-Nifty and Sensex, the issued debentures, and a zero Bid Ask Spread, and returns
+Nifty and Sensex, the whole issue's debentures (Mobilization ÷ Face Value, unrounded), and
+each leg's Bid Ask table spread, and returns
 `{ quotes, unwindDate, nifty, sensex, spotSource, priceAsOfDate, priced }`.
 
 ## UI notes

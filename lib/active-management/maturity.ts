@@ -1,3 +1,4 @@
+import { optionCashToWholeIssue } from "@/lib/active-management/book-value";
 import { lookupFwdSellRate } from "@/lib/engine/vol-surface";
 import { postObservationFigures } from "@/lib/multi/post-observation";
 import type { ProductMaster, UnwindResult, VolSurface } from "@/lib/types";
@@ -38,16 +39,26 @@ import { daysBetween, parseISODate, roundDeskMoney } from "@/lib/utils";
  * The NBFC part grows to about the payout by construction, so the figure is mostly the option
  * book's expected cash at maturity: negative when the sold puts are expected to pay out.
  *
+ * What the number is: the payout subtracted is the maximum redemption, the full contingent
+ * coupon on every debenture, not what the payoff formula would pay at the expected level. With
+ * the NBFC part sized to that maximum, the figure is the expected shortfall against it. Coupons
+ * here run near 100%, so while the index sits below a product's coupon strikes the figure is a
+ * large share of its mobilization (docs/11).
+ *
  * Sign: positive means the book is worth more than the payout, the same way round as Post
  * Observation's Difference (Unwind Amount − Expected Amount), which compares a value today with a
  * payout at maturity instead. At an expected level, the live legs' mids come from the unwind at
- * that level. Option cash is at the debentures the unwind ran on; the Product Book runs at the
- * issued count, so it is the whole issue. Null when mobilization or face value is not positive,
- * or a figure is not finite.
+ * that level. Whole issue throughout: computeUnwind sizes option cash to the debentures it ran on,
+ * so that cash is taken to the whole issue (optionCashToWholeIssue) before it meets the grown
+ * values and the payout. Null when mobilization or face value is not positive, or a figure is not
+ * finite.
  */
 export function expectedDifferenceAtMaturity(
   product: ProductMaster,
-  result: Pick<UnwindResult, "masterEconomics" | "investedTenorDays" | "residualTenor" | "optionRows" | "unwindDate">,
+  result: Pick<
+    UnwindResult,
+    "masterEconomics" | "investedTenorDays" | "residualTenor" | "optionRows" | "unwindDate" | "debentures" | "totalDebs"
+  >,
   surface: VolSurface,
 ): number | null {
   if (!(product.mobilization > 0) || !(product.faceValue > 0)) return null;
@@ -80,6 +91,9 @@ export function expectedDifferenceAtMaturity(
     optionCashAtMaturity += midCash * Math.exp(q * tau) * carry;
   }
 
-  const difference = assetsAtMaturity + optionCashAtMaturity - postObservationFigures(product, null).expectedAmount;
+  const difference =
+    assetsAtMaturity +
+    optionCashAtMaturity * optionCashToWholeIssue(result) -
+    postObservationFigures(product, null).expectedAmount;
   return Number.isFinite(difference) ? roundDeskMoney(difference) : null;
 }

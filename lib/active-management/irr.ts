@@ -55,6 +55,7 @@ export function irrSet(
     | "investedTenorDays"
     | "faceValue"
     | "totalDebs"
+    | "debentures"
     | "unwindDate"
     | "masterEconomics"
     | "optionRows"

@@ -11,7 +11,7 @@ import targetSeed from "../lib/data/am-targets-seed.json";
 import volSeed from "../lib/data/vol-surface-seed.json";
 import { BID_ASK_BUCKETS, bidAskSpreadPercent, bidAskTableRows } from "../lib/active-management/bid-ask";
 import { activeManagementQuote } from "../lib/active-management/book-row";
-import { BOOK_SCENARIO_SHIFTS, bookScenarioRows, productBookInputs } from "../lib/active-management/book-scenario";
+import { BOOK_SCENARIO_SHIFTS, bookScenarioRows, productBookInputs, wholeIssueDebentures } from "../lib/active-management/book-scenario";
 import { bookValue, settledOutflowCarryRs } from "../lib/active-management/book-value";
 import { irrSet, maxIrr } from "../lib/active-management/irr";
 import { expectedDifferenceAtMaturity } from "../lib/active-management/maturity";
@@ -66,13 +66,13 @@ function fixedClose(day: string, underlying: "Nifty" | "Sensex"): number {
   return underlying === "Sensex" ? Math.round(nifty * 3.3 * 100) / 100 : nifty;
 }
 
-/** Quotes-route conventions: as-of, issued debentures, spread 0, desk spots, the closes the unwind settles with. */
+/** Quotes-route conventions: as-of, the whole issue's debentures, spread 0, desk spots, the closes the unwind settles with. */
 function inputsFor(p: ProductMaster): UnwindInputs {
   const underlying = underlyingFromProductName(p.productName, p.productCode);
   const expirySpots: Record<string, number> = {};
   for (const day of collectExpiredLegExpiryDates(p, AS_OF)) expirySpots[day] = fixedClose(day, underlying);
   return {
-    debentures: issuedCount(p),
+    debentures: wholeIssueDebentures(p),
     unwindDate: AS_OF,
     spot: underlying === "Sensex" ? SENSEX : NIFTY,
     underlying,
@@ -790,6 +790,65 @@ function quoteBasis(p: ProductMaster, closes: (day: string) => number): UnwindIn
       q735.expectedExitValueRs! > q735.exitValueRs! &&
       q735.expectedDifferenceRs! > ed735,
     `${q735.exitValueRs} → ${q735.expectedExitValueRs}; ${ed735} → ${q735.expectedDifferenceRs}`,
+  );
+}
+
+// Whole issue. The Product Book prices Mobilization ÷ Face Value unrounded, and Exit Value, Current
+// IRR and Expected Difference do not move with the debentures an unwind ran on: computeUnwind sizes
+// option cash to them while its grown values and the payout are always the whole issue.
+{
+  const basis = { unwindDate: AS_OF, nifty: NIFTY, sensex: SENSEX };
+  const fractional = book.filter((p) => !Number.isInteger(p.mobilization / p.faceValue));
+  const exact = book.filter((p) => productBookInputs(p, basis).debentures === p.mobilization / p.faceValue).length;
+  const p774 = named("Nifty Accelerator - 774");
+  check(
+    "the Product Book prices the whole issue, Mobilization ÷ Face Value, unrounded",
+    exact === book.length && fractional.length > 0 && productBookInputs(p774, basis).debentures === 161.6,
+    `${exact} of ${book.length}; ${fractional.length} live issues are fractional, 774 is ${productBookInputs(p774, basis).debentures}`,
+  );
+
+  const sample = [
+    named("Nifty Accelerator - 1596"),
+    named("Nifty Accelerator - 705"),
+    named("Nifty Accelerator - 774"),
+    named("Gearing Accelerator - 274"),
+    named("Gearing Sensex Accelerator - 22"),
+  ];
+  let steady = 0;
+  let mixedBefore = 0;
+  const lines: string[] = [];
+  for (const p of sample) {
+    const underlying = underlyingFromProductName(p.productName, p.productCode);
+    const whole = quoteBasis(p, (day) => fixedClose(day, underlying));
+    const base = computeUnwind({ product: p, surface, inputs: whole });
+    const legs = base.optionRows.length;
+    const baseExit = bookValue(p, base).exitValueRs;
+    const baseIrr = irrSet(base, p).currentIrr;
+    const baseEd = expectedDifferenceAtMaturity(p, base, surface)!;
+    let same = true;
+    for (const debentures of [800, issuedCount(p), whole.debentures / 3]) {
+      const r = computeUnwind({ product: p, surface, inputs: { ...whole, debentures } });
+      const scale = whole.debentures / debentures;
+      // Each leg's cash is rounded to the paisa at the typed count, then taken to the whole issue.
+      const paisa = 0.01 * (legs + 1) * Math.max(scale, 1);
+      const irr = irrSet(r, p).currentIrr;
+      if (
+        Math.abs(bookValue(p, r).exitValueRs - baseExit) > paisa ||
+        Math.abs(expectedDifferenceAtMaturity(p, r, surface)! - baseEd) > 2 * paisa ||
+        (irr == null) !== (baseIrr == null) ||
+        (irr != null && Math.abs(irr - baseIrr!) > 1e-6)
+      ) {
+        same = false;
+      }
+      if (debentures === 800 && Math.abs(r.masterEconomics.unwindValueRs - base.masterEconomics.unwindValueRs) > 1) mixedBefore += 1;
+    }
+    if (same) steady += 1;
+    lines.push(`${p.productName.trim()} Exit ${baseExit.toFixed(2)} ED ${baseEd.toFixed(2)}`);
+  }
+  check(
+    "Exit Value, Current IRR and Expected Difference are the whole issue's at 800, the rounded and a third of the debentures",
+    steady === sample.length && mixedBefore === sample.length,
+    `${steady} of ${sample.length}; ${lines.join("; ")}`,
   );
 }
 

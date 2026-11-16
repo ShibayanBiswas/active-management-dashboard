@@ -126,45 +126,50 @@ export function quoteViewFromUnwind(result: UnwindResult, asOf: string): Product
   };
 }
 
-/** Premium Outflow Amount on legs whose option expiry falls inside the window. */
+/**
+ * Premium Outflow Amount on legs whose option expiry falls inside the window: each leg's own
+ * cash, signed as on the Options Book (a sold leg settling in the money is negative). The window
+ * ends no later than the desk date, so every leg in it has settled at the index close on or before
+ * its expiry. pending: a product with a leg in the window has no quote yet. unpriced: products
+ * whose quote came back without leg marks (the unwind failed); they are left out of total instead
+ * of holding the card on "Pricing" for good.
+ */
 export function premiumOutflowInWindow(
   products: ProductMaster[],
   quoteFor: (product: ProductMaster) => ProductBookQuoteView | null,
   start: string,
   end: string,
-): { total: number | null; legs: number; pending: boolean; products: number; priced: number } {
-  if (!start || !end || start > end) return { total: null, legs: 0, pending: false, products: 0, priced: 0 };
+): { total: number | null; legs: number; pending: boolean; products: number; priced: number; unpriced: number } {
+  if (!start || !end || start > end) return { total: null, legs: 0, pending: false, products: 0, priced: 0, unpriced: 0 };
   let total = 0;
   let legs = 0;
   let pending = false;
   let inWindow = 0;
   let priced = 0;
+  let unpriced = 0;
   for (const product of products) {
-    const quote = quoteFor(product);
-    const book = liveLegsOf(product);
-    const hasWindowLeg = book.some((leg) => {
+    const windowLegs: number[] = [];
+    liveLegsOf(product).forEach((leg, index) => {
       const day = String(leg.expiry ?? "").slice(0, 10);
-      return day >= start && day <= end;
+      if (day >= start && day <= end) windowLegs.push(index);
     });
-    if (hasWindowLeg) inWindow += 1;
+    if (!windowLegs.length) continue;
+    inWindow += 1;
+    const quote = quoteFor(product);
     if (!quote) {
-      if (hasWindowLeg) pending = true;
+      pending = true;
       continue;
     }
-    if (hasWindowLeg) priced += 1;
-    book.forEach((leg, index) => {
-      const day = String(leg.expiry ?? "").slice(0, 10);
-      if (day < start || day > end) return;
-      const amount = quote.legs[index]?.premiumOutflowAmount;
-      if (amount == null || !Number.isFinite(amount)) {
-        pending = true;
-        return;
-      }
-      total += amount;
-      legs += 1;
-    });
+    priced += 1;
+    const cash = windowLegs.map((index) => quote.legs[index]?.premiumOutflowAmount);
+    if (cash.some((amount) => amount == null || !Number.isFinite(amount))) {
+      unpriced += 1;
+      continue;
+    }
+    for (const amount of cash) total += amount!;
+    legs += cash.length;
   }
-  return { total: pending ? null : roundDeskMoney(total), legs, pending, products: inWindow, priced };
+  return { total: pending ? null : roundDeskMoney(total), legs, pending, products: inWindow, priced, unpriced };
 }
 
 function staticSpread(leg: OptionLeg, product: ProductMaster): number | null {

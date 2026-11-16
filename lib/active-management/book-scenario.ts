@@ -26,9 +26,19 @@ export type BookScenarioRow = { underlying: UnderlyingIndex; baseSpot: number; c
 export const BOOK_SCENARIO_SHIFTS: number[] = scenarioLevels(0);
 
 /**
+ * Debentures in the whole issue, Mobilization ÷ Face Value, unrounded, as the workbook's D ÷ T.
+ * The grown values and the payout are on this count, so the option legs must be too: the rounded
+ * issuedCount sized Nifty Accelerator 774's legs to 162 debentures of its 161.6. issuedCount when
+ * mobilization or face value is not positive.
+ */
+export function wholeIssueDebentures(product: ProductMaster): number {
+  return product.mobilization > 0 && product.faceValue > 0 ? product.mobilization / product.faceValue : issuedCount(product);
+}
+
+/**
  * The Product Book unwind basis, shared by POST /api/multi/quotes and /api/multi/scenarios:
- * the desk date, the issued debentures, the desk spots, and no flat spread, so each leg takes
- * its Bid Ask table spread. Expiry closes are added by the caller.
+ * the desk date, the whole issue's debentures, the desk spots, and no flat spread, so each leg
+ * takes its Bid Ask table spread. Expiry closes are added by the caller.
  */
 export function productBookInputs(
   product: ProductMaster,
@@ -36,7 +46,7 @@ export function productBookInputs(
 ): UnwindInputs {
   const underlying = underlyingFromProductName(product.productName, product.productCode);
   return {
-    debentures: issuedCount(product),
+    debentures: wholeIssueDebentures(product),
     unwindDate: basis.unwindDate,
     spot: underlying === "Sensex" ? basis.sensex : basis.nifty,
     underlying,

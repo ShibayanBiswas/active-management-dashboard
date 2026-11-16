@@ -441,7 +441,7 @@ const MODULES: LogicModule[] = [
       "A product with a zero coupon has no cap, so its Current rate is not capped.",
       "Expected rate reprices every live option at the Spot Level. Expired options keep the closes they settled at.",
       "With the Spot Level at today's level, Expected rate equals Current rate.",
-      "Exit Value is the Unwind Value at today's level plus interest on settled option cash from each expiry. Expected Difference grows the book to maturity at the Spot Level and takes off the payout.",
+      "Exit Value is the Unwind Value at today's level plus interest on settled option cash from each expiry. Expected Difference grows the book to maturity at the Spot Level and takes off the full-coupon payout, so it is the expected shortfall against the maximum redemption. Both are for the whole issue, whatever number of debentures is typed.",
       "A book quote at or below zero, or an unwind on the allotment date, shows a dash rather than a zero rate.",
     ],
     outputs: ["Current Internal Rate of Return", "Expected Internal Rate of Return"],

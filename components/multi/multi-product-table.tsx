@@ -75,7 +75,7 @@ type FlatLeg = {
   legIndex: number;
 };
 
-/** "…" while any product's quote is pending (or, for Expected Difference, priced at other levels). */
+/** "…" while any product's quote is pending. */
 type BookTotal = number | "pending" | null;
 
 /** Sum of the finite values, one per product, as the workbook totals do. Null when none is finite. */
@@ -186,14 +186,12 @@ export function MultiProductTable() {
     [windowProducts, quotes, filters.rangeStart, filters.rangeEnd],
   );
 
-  // Workbook totals for the products on screen, one value per product.
+  // Workbook Summary I1 and J1 for the products on screen, one value per product, whole issue.
   const totals = useMemo(() => {
     const seen = new Set<string>();
     const mobilization: number[] = [];
     const exitValues: Array<number | null | undefined> = [];
-    const differences: Array<number | null | undefined> = [];
     let quotePending = false;
-    let expectedPending = false;
     for (const product of shown) {
       const key = productKey(product);
       if (seen.has(key)) continue;
@@ -204,16 +202,13 @@ export function MultiProductTable() {
         quotePending = true;
         continue;
       }
-      if (!sameAssumedLevels(quote.pricedAt, expectedLevels)) expectedPending = true;
       exitValues.push(quote.am?.exitValueRs);
-      differences.push(quote.am?.expectedDifferenceRs);
     }
     return {
       mobilization: bookTotal(mobilization, false),
       exitValue: bookTotal(exitValues, quotePending),
-      expectedDifference: bookTotal(differences, quotePending || expectedPending),
     };
-  }, [shown, quotes, expectedLevels]);
+  }, [shown, quotes]);
 
   const flat = useMemo(() => {
     const rows: FlatLeg[] = [];
@@ -379,6 +374,8 @@ export function MultiProductTable() {
                   ? "—"
                   : windowOutflow.pending
                   ? `Pricing ${windowOutflow.priced.toLocaleString("en-IN")} / ${windowOutflow.products.toLocaleString("en-IN")}`
+                  : windowOutflow.unpriced
+                  ? `${formatDeskRupees(windowOutflow.total)} · ${windowOutflow.unpriced.toLocaleString("en-IN")} Not Priced`
                   : formatDeskRupees(windowOutflow.total)}
               </span>
             </div>
@@ -402,7 +399,6 @@ export function MultiProductTable() {
         cards={[
           { label: "Total Mobilization", value: totalText(totals.mobilization) },
           { label: "Total Exit Value", value: totalText(totals.exitValue) },
-          { label: "Total Expected Difference", value: totalText(totals.expectedDifference) },
         ]}
       />
       <p className="mb-3 text-xs text-muted">

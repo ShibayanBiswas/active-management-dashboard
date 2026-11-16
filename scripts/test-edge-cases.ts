@@ -51,7 +51,7 @@ import {
   PRODUCT_BOOK_HEADERS,
 } from "../lib/workbook/export-columns";
 import { allOptionExpiriesPassed, amountWithNbfcRupees, postObservationDisplayRow, postObservationFigures } from "../lib/multi/post-observation";
-import { premiumOutflowInWindow } from "../lib/workbook/product-book-rows";
+import { premiumOutflowInWindow, type ProductBookQuoteView } from "../lib/workbook/product-book-rows";
 import { buildProductBookMatrix, clubProductBookDisplay } from "../lib/workbook/product-book-rows";
 import { PRODUCT_BOOK_MERGE_COLS } from "../lib/workbook/table-merge";
 
@@ -946,37 +946,51 @@ const oneExpiry = {
   ...passedBook,
   legs: [{ ...(passedBook.legs.find((leg) => leg.reqQuantity) ?? passedBook.legs[0]!), expiry: "2020-01-01" }],
 };
-const windowSum = premiumOutflowInWindow(
-  [oneExpiry],
-  () => ({
-    quoteRs: 1,
-    productIRR: 0,
-    clientIRR: 0,
-    residualIRR: 0,
-    premiumOutflowRs: -50,
-    asOf: "2026-10-10",
-    economics: null,
-    funding: null,
-    legs: [
-      {
-        optionType: "Put",
-        strike: 1,
-        spreads: 1,
-        original: "Sell",
-        unwindSide: "Buy",
-        quantity: -1,
-        premiumPerSpread: null,
-        productPremiumAmount: 0,
-        unwindOptionPrice: 50,
-        premiumOutflowAmount: -50,
-        displayOnly: false,
-      },
-    ],
-  }),
-  "2020-01-01",
-  "2020-01-01",
-);
+const windowQuote = (): ProductBookQuoteView => ({
+  quoteRs: 1,
+  productIRR: 0,
+  clientIRR: 0,
+  residualIRR: 0,
+  premiumOutflowRs: -50,
+  asOf: "2026-10-10",
+  economics: null,
+  funding: null,
+  legs: [
+    {
+      optionType: "Put",
+      strike: 1,
+      spreads: 1,
+      original: "Sell",
+      unwindSide: "Buy",
+      quantity: -1,
+      premiumPerSpread: null,
+      productPremiumAmount: 0,
+      unwindOptionPrice: 50,
+      premiumOutflowAmount: -50,
+      displayOnly: false,
+    },
+  ],
+});
+const windowSum = premiumOutflowInWindow([oneExpiry], windowQuote, "2020-01-01", "2020-01-01");
 check("premium outflow card sums legs inside the observation window", windowSum.total === -50 && windowSum.legs === 1, String(windowSum.total));
+// A second product in the window: still pricing, then priced, then a quote that came back without
+// leg marks (the route's failure shape), which is reported and left out instead of holding "Pricing".
+const otherExpiry = { ...oneExpiry, productName: "Other Window Product", productCode: "OTHER-WINDOW" };
+const waiting = premiumOutflowInWindow([oneExpiry, otherExpiry], (p) => (p === otherExpiry ? null : windowQuote()), "2020-01-01", "2020-01-01");
+check(
+  "premium outflow card waits while a window product has no quote",
+  waiting.pending && waiting.total === null && waiting.priced === 1 && waiting.products === 2,
+  JSON.stringify(waiting),
+);
+const failedQuote = { ...windowQuote(), quoteRs: null, premiumOutflowRs: null, legs: [] };
+const failedWindow = premiumOutflowInWindow([oneExpiry, otherExpiry], (p) => (p === otherExpiry ? failedQuote : windowQuote()), "2020-01-01", "2020-01-01");
+check(
+  "premium outflow card reports a failed quote as not priced and totals the rest",
+  !failedWindow.pending && failedWindow.unpriced === 1 && failedWindow.priced === 2 && failedWindow.total === -50 && failedWindow.legs === 1,
+  JSON.stringify(failedWindow),
+);
+const outside = premiumOutflowInWindow([oneExpiry], () => null, "2020-01-02", "2020-01-31");
+check("premium outflow card ignores products with no leg in the window", !outside.pending && outside.products === 0 && outside.total === 0, JSON.stringify(outside));
 
 console.log(failures ? `\n${failures} edge case checks FAILED` : "\nEdge case checks PASSED");
 if (failures) process.exit(1);

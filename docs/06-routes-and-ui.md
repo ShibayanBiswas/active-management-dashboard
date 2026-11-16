@@ -59,6 +59,9 @@ per leg. **Export View** downloads the rows on screen: the current search, obser
 The Product Book observation row has a Premium Outflow card before Reveal. It sums Premium Outflow Amount on option legs whose expiry falls inside the start and end dates, for the products on the current tab that match the observation mode. While those products price it reads
 `Pricing k / n`; products with a passed observation are priced first, so the card settles in a few
 batches. A failed quote batch is retried twice before it is left blank.
+- The End Date stops at today, so the card is cash already settled.
+- A product whose quote comes back without leg marks is left out of the card and counted as `Not Priced` beside the total. It no longer holds the card on `Pricing n / n`.
+- Below the observation row, the totals strip shows Total Mobilization and Total Exit Value. Total Expected Difference was removed on 16-Nov-2026; see [11](11-active-management.md).
 
 Every Download Excel workbook (Product Book, Unwinding Summary, Options Book, Pricer, Post Observation) stores rupees, rates, prices, quantities, and dates as Excel numbers and dates, and uses
 dynamic column widths with **no cell indent / padding** on values.
