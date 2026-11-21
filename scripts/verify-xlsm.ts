@@ -70,10 +70,12 @@ assertClose("xlsm second put price", row1.price, 923.58, 0.01);
 const result = computeUnwind({
   product,
   surface,
+  // Spread 0: the XLSM's own Bid/offer. Blank here means the Bid Ask table.
   inputs: {
     debentures: cached.debentures,
     unwindDate: cached.unwindDate,
     spot,
+    bidAskSpread: 0,
   },
 });
 

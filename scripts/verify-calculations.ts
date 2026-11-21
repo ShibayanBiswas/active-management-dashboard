@@ -17,6 +17,8 @@ function assertClose(label: string, actual: number, expected: number, tol: numbe
 const product = productSeed as ProductMaster;
 const surface = volSeed as VolSurface;
 
+// Spread 0: the golden is the workbook at its own Bid/offer of 0. Blank here means the Bid Ask
+// table, which now reaches the headline through the side marks.
 const result = computeUnwind({
   product,
   surface,
@@ -24,6 +26,7 @@ const result = computeUnwind({
     debentures: golden.inputs.debentures,
     unwindDate: golden.inputs.unwindDate,
     spot: golden.inputs.spot,
+    bidAskSpread: 0,
   },
 });
 

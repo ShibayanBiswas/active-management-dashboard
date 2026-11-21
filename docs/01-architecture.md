@@ -88,9 +88,10 @@ new deployment's seed.
    enter Premium Outflow and Unwind Value. An expired option uses one in-the-money price
    for Unwind Buy and Unwind Sell, from the Yahoo close on that expiry: put
    max(strike − spot, 0), call max(spot − strike, 0). Original Sell pays it. Original Buy
-   receives it as a positive inflow. Each amount is that price times the row's Unwind
-   Quantity. Net Premium Outflow is the sum of every leg amount, and that sum is in
-   Unwind Value. Pricer Price/Sell/Buy stay Excel IFERROR → 0. Out-of-the-money expired
+   receives it as a positive inflow. Each Options Book amount is that price times the
+   row's Unwind Quantity (the typed holding). Net Premium Outflow is that price times
+   Required Quantity summed over the whole issue (Main Master AC / AN), and that sum is
+   in Unwind Value, so the typed holding does not move the book quote. Pricer Price/Sell/Buy stay Excel IFERROR → 0. Out-of-the-money expired
    options stay 0.
 6. Display Quantity, lot round-off, Premium, Product Premium and Premium Outflow are
    computed per leg.

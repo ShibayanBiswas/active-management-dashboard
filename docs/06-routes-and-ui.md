@@ -240,7 +240,8 @@ An expired option shows its in-the-money price on the Options Book, never negati
 that price is the same for Unwind Buy and Unwind Sell. A put is max(strike − spot, 0).
 A call is max(spot − strike, 0). Original Sell pays that cash. Original Buy receives it,
 so an in-the-money long prints a positive Premium Outflow Amount. The product Premium
-Outflow is the sum of every leg amount. Pricer
+Outflow is the same prices times Required Quantity on the whole issue, so on the Product
+Book (priced at the whole issue) it is the sum of every leg amount. Pricer
 Price/Sell/Buy stay **0** (Excel IFERROR). Each expired leg uses the index close
 on/before **that leg's expiry date**. On screen, counted live marks and expired
 intrinsic stay bold maroon. Expired out-of-the-money zeros stay faint. Desk pages keep titles and numbers only — no Options Book

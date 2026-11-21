@@ -66,13 +66,20 @@ export function resolveContingentLevel(product: ProductMaster): number {
  *   Amt with NBFC  = Mobilization × (1 − Σcosts) − TotalFundsForMargin
  *   Grown Value    = FV(prdDisc, inv/365, −AmtWithNBFC) + FV(marginFundingRate, inv/365, −TotalFundsForMargin)
  *   Prem Grown     = FV(premDisc, inv/365, −PremiumCredited)
- *   Premium Outflow= Σ each leg's Premium Outflow Amount
- *   Unwind Value   = Grown + PremGrown + PremiumOutflow
+ *   Premium Outflow= Σ Unwind Price × Required Quantity (whole issue, Main Master AC / AN)
+ *   Unwind Value   = Grown + PremGrown + PremiumOutflow + Mobilization × residual margin
  *   Unwind Quote   = Unwind Value / TotalDebs
+ *
+ * The Options Book Premium Outflow Amount is the same price × the Unwind Quantity on the
+ * typed holding. Only the whole-issue sum enters the whole-book Unwind Value.
  *
  * Headline percent quote:
  *   NBFC Grown %   = Grown Value / Mobilization
+ *   PremOutflow%   = Σ ±Unwind Price × Spreads / COUNTIFS / ContingentLevel (Calculator L11)
  *   Pricer Unwind  = NBFCGrown% + PremGrown% + PremOutflow% + Margin×(Tenor−Inv)/Tenor
+ *
+ * Active Management only: each row also carries the spread-free mid (midPrice), which Expected
+ * Difference reads, since nothing is unwound at maturity.
  */
 export function computeUnwind(args: {
   product: ProductMaster;
@@ -134,6 +141,7 @@ export function computeUnwind(args: {
   }
 
   const optionRows: OptionTableRow[] = [];
+  let issueOutflowRs = 0;
 
   for (const leg of liveLegs) {
     const priced = priceLeg({
@@ -145,11 +153,13 @@ export function computeUnwind(args: {
       underlying,
     });
     const mark = unwindMarkPrice(priced, String(leg.originalSide));
-    const mid = priced.price;
 
     const original = String(leg.originalSide);
     const unwind = flipSide(original);
     const reqQty = leg.reqQuantity ?? 0;
+    // Spreads is a size; the side gives the sign. Some masters store it negative (Gearing
+    // Accelerator 40's 20,625 Sell is −16 with Req. Quantity −9,696.97), which would flip the leg.
+    const spreadsSize = Math.abs(leg.spreads);
 
     // Display quantity tracks Required Quantity on the Product Master, scaled to the
     // typed holding. Same strike / spreads / side therefore share one quantity across
@@ -160,9 +170,11 @@ export function computeUnwind(args: {
     } else {
       const level = resolveContingentLevel(product);
       const divisor = Math.max(leg.qtyDivisor ?? 1, 1);
-      const baseAbs = Math.round(((leg.spreads * dens * face) / level) * 100) / 100 / divisor;
+      const baseAbs = Math.round(((spreadsSize * dens * face) / level) * 100) / 100 / divisor;
       quantity = original.toLowerCase() === "sell" ? -baseAbs : baseAbs;
     }
+    // Whole-issue quantity for the whole-book economics: Required Quantity itself.
+    const issueQuantity = reqQty !== 0 ? reqQty : dens > 0 ? quantity * (totalDebs / dens) : 0;
 
     // Live: Unwind Buy → Pricer Buy Price, Unwind Sell → Pricer Sell Price.
     // Expired: the same in-the-money price for Unwind Buy and Unwind Sell.
@@ -177,9 +189,10 @@ export function computeUnwind(args: {
     const intrinsic = expired ? expiredIntrinsicMark(settlementSpot, leg.strike, isCall) : null;
     const bookMark = intrinsic ?? mark;
     const unwindPrice = intrinsic != null ? intrinsic : signedUnwindPrice(bookMark, unwind);
-    // Cash uses the Unwind Quantity on this row, so price × quantity is the amount,
-    // and the sum of the amounts is the net Premium Outflow.
+    // Row cash uses the Unwind Quantity on this row (the typed holding).
     const premiumOutflowRs = roundDeskMoney(bookMark * quantity);
+    // Main Master AC = Unwind Price × Required Quantity. Its sum is the whole-book outflow.
+    issueOutflowRs += roundDeskMoney(bookMark * issueQuantity);
     const masterPrice = leg.prdPrice ?? product.prdPrice;
     // Product Premium Amount stays on Required Quantity (Main Master / XLSM parity).
     const prdPremium = roundDeskMoney(masterPrice * -reqQty);
@@ -188,22 +201,20 @@ export function computeUnwind(args: {
         ? roundDeskMoney(Math.abs(masterPrice))
         : null;
 
-    // Headline Current Premium Outflow: live mids plus expired intrinsic on both sides.
-    // The side gives the sign, so Number of Spreads counts as a size: a sold leg stored with
-    // negative spreads would otherwise be negated twice.
-    const spreadSize = Math.abs(leg.spreads);
-    const showPrice = expired || mid > PRICE_BLANK_EPS;
-    const currentPrice = intrinsic != null && intrinsic > 0 ? intrinsic : showPrice ? mid : null;
+    // Headline Current Premium Outflow: Calculator Current Price is the Main Master Unwind
+    // Price (the bid or offer side, so Bid Ask Spread moves it), plus expired intrinsic.
+    const showPrice = expired || mark > PRICE_BLANK_EPS;
+    const currentPrice = intrinsic != null && intrinsic > 0 ? intrinsic : showPrice ? mark : null;
     let premiumCell: number | null = null;
-    if (!expired && showPrice && mid > PRICE_BLANK_EPS) {
+    if (!expired && showPrice && mark > PRICE_BLANK_EPS) {
       const count = groupCounts.get(groupKey(String(leg.optionType), leg.strike, leg.spreads)) ?? 1;
-      const signed = unwind.toLowerCase() === "sell" ? mid * spreadSize : -mid * spreadSize;
+      const signed = unwind.toLowerCase() === "sell" ? mark * spreadsSize : -mark * spreadsSize;
       premiumCell = signed / count;
     } else if (intrinsic != null && intrinsic > 0) {
       const count = groupCounts.get(groupKey(String(leg.optionType), leg.strike, leg.spreads)) ?? 1;
       // Original Sell pays. Original Buy receives.
       const signed = original.trim().toLowerCase() === "sell" ? -intrinsic : intrinsic;
-      premiumCell = (signed * spreadSize) / count;
+      premiumCell = (signed * spreadsSize) / count;
     } else if (showPrice && expired) {
       premiumCell = 0;
     }
@@ -216,7 +227,9 @@ export function computeUnwind(args: {
       unwind,
       expiry: leg.expiry,
       quantity,
+      issueQuantity,
       currentPrice,
+      midPrice: priced.price,
       premium: premiumCell,
       premiumPerSpread,
       sdCode: leg.sdCode ?? priced.code,
@@ -241,10 +254,13 @@ export function computeUnwind(args: {
 
   const grownRounded = roundDeskMoney(grownValueRs);
   const premGrownRounded = roundDeskMoney(premGrownValueRs);
-  const outflowRounded = roundDeskMoney(
-    optionRows.reduce((sum, row) => sum + row.premiumOutflowRs, 0),
+  // Whole issue, so the typed holding does not move the whole-book Unwind Value.
+  const outflowRounded = roundDeskMoney(issueOutflowRs);
+  // Main Master Unwind Value adds Mobilization × Margin Cost × (Maturity − Unwind) / Tenor.
+  const marginResidualRs = roundDeskMoney(product.mobilization * marginResidual);
+  const unwindValueRs = roundDeskMoney(
+    grownRounded + premGrownRounded + outflowRounded + marginResidualRs,
   );
-  const unwindValueRs = roundDeskMoney(grownRounded + premGrownRounded + outflowRounded);
   const masterEconomics: MasterEconomics = {
     premiumCreditedRs: roundDeskMoney(premiumCreditedRs),
     premiumOutflowRs: outflowRounded,

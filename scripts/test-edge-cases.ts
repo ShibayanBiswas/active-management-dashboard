@@ -54,6 +54,7 @@ import { allOptionExpiriesPassed, amountWithNbfcRupees, postObservationDisplayRo
 import { premiumOutflowInWindow, type ProductBookQuoteView } from "../lib/workbook/product-book-rows";
 import { buildProductBookMatrix, clubProductBookDisplay } from "../lib/workbook/product-book-rows";
 import { PRODUCT_BOOK_MERGE_COLS } from "../lib/workbook/table-merge";
+import { wholeIssueDebentures } from "../lib/active-management/book-scenario";
 
 const product = productSeed as ProductMaster;
 const surface = volSeed as VolSurface;
@@ -115,12 +116,23 @@ function allFinite(obj: Record<string, unknown>, prefix: string) {
     expiredSellPutMark(22800, 14960) === 0,
     String(expiredSellPutMark(22800, 14960)),
   );
-  // Reconstruct KPI from required quantity path via engine result identity.
+  // Main Master AC / AN: the whole-book card is price × Required Quantity summed over legs.
+  const issueCashSum = result.optionRows.reduce(
+    (sum, row) => sum + roundDeskMoney(row.unwindPrice * row.issueQuantity),
+    0,
+  );
+  check(
+    "net Premium Outflow is the sum of every leg's price × Required Quantity",
+    Math.abs(result.masterEconomics.premiumOutflowRs - issueCashSum) < 0.02 &&
+      result.optionRows.every((row, i) => row.issueQuantity === product.legs[i]?.reqQuantity),
+    `${result.masterEconomics.premiumOutflowRs} vs ${issueCashSum}`,
+  );
   const legCashSum = result.optionRows.reduce((sum, row) => sum + row.premiumOutflowRs, 0);
   check(
-    "net Premium Outflow is the sum of every leg cash amount",
-    Math.abs(result.masterEconomics.premiumOutflowRs - legCashSum) < 0.02,
-    `${result.masterEconomics.premiumOutflowRs} vs ${legCashSum}`,
+    "Options Book leg cash is the whole-issue outflow scaled to the typed holding",
+    Math.abs(legCashSum - (result.masterEconomics.premiumOutflowRs * 800) / result.totalDebs) <
+      0.01 * result.optionRows.length,
+    `${legCashSum} vs ${(result.masterEconomics.premiumOutflowRs * 800) / result.totalDebs}`,
   );
   check(
     "expired sell-put intrinsic enters Premium Outflow KPI",
@@ -146,6 +158,150 @@ function allFinite(obj: Record<string, unknown>, prefix: string) {
     }),
     String(sellPutOutflow),
   );
+}
+
+// 1b. Premium Outflow against the workbook. Main Master AC = Unwind Price × Req. Quantity
+//     (whole issue), AU = Grown + Prem Grown + AN + residual margin, AV = AU / issued.
+//     Calculator Current Price is Main Master AB (the bid or offer side), so a Bid Ask spread
+//     moves the headline. On the 961 book Required Quantity follows Spreads, so Book Unwind Per
+//     Debenture equals the headline Unwind Quote Amount at any holding. bidAskSpread 0 here is
+//     the Unwinding Calculator's default; this app's default (null) is the Bid Ask table.
+{
+  const base = { unwindDate: "2025-02-21", spot: 22800, bidAskSpread: 0 };
+  const issued = product.mobilization / product.faceValue;
+  const full = computeUnwind({ product, surface, inputs: { ...base, debentures: issued } });
+  const held = computeUnwind({ product, surface, inputs: { ...base, debentures: 800 } });
+  check(
+    "typed holding does not move the whole-book Premium Outflow, Unwind Value, or book quote",
+    held.masterEconomics.premiumOutflowRs === full.masterEconomics.premiumOutflowRs &&
+      held.masterEconomics.unwindValueRs === full.masterEconomics.unwindValueRs &&
+      held.masterEconomics.unwindQuoteRs === full.masterEconomics.unwindQuoteRs,
+    `${held.masterEconomics.unwindQuoteRs} vs ${full.masterEconomics.unwindQuoteRs}`,
+  );
+  // Invariance: every per-debenture figure is the same whatever count is typed, and the
+  // Options Book cash per typed debenture is the whole-issue leg cash per issued debenture.
+  for (const typed of [1, 250, 800, 1500]) {
+    const r = computeUnwind({ product, surface, inputs: { ...base, debentures: typed } });
+    check(
+      `per-debenture figures do not move at ${typed} typed debentures`,
+      r.unwindQuotePct === full.unwindQuotePct &&
+        r.unwindQuoteRs === full.unwindQuoteRs &&
+        r.clientIRR === full.clientIRR &&
+        r.currentPremOutflowPct === full.currentPremOutflowPct &&
+        r.masterEconomics.unwindQuoteRs === full.masterEconomics.unwindQuoteRs &&
+        r.masterEconomics.unwindValueRs === full.masterEconomics.unwindValueRs &&
+        r.optionRows.every(
+          (row, i) =>
+            Math.abs(row.premiumOutflowRs / typed - (full.optionRows[i]?.premiumOutflowRs ?? NaN) / issued) <
+            0.01 / typed + 0.01 / issued,
+        ),
+      `${r.masterEconomics.unwindQuoteRs} vs ${full.masterEconomics.unwindQuoteRs}`,
+    );
+  }
+  check(
+    "Book Unwind Per Debenture equals the headline Unwind Quote Amount at 800 debentures",
+    Math.abs(held.masterEconomics.unwindQuoteRs - held.unwindQuoteRs) < 0.05,
+    `${held.masterEconomics.unwindQuoteRs} vs ${held.unwindQuoteRs}`,
+  );
+  check(
+    "Options Book row still prices the typed holding",
+    held.optionRows.every(
+      (row, i) => Math.abs(row.quantity - (row.issueQuantity * 800) / issued) < 1e-6 &&
+        Math.abs(row.premiumOutflowRs - roundDeskMoney(Math.abs(row.unwindPrice) * row.quantity)) < 1e-9 &&
+        row.issueQuantity === full.optionRows[i]?.quantity,
+    ),
+  );
+
+  // Spreads is a size and the side gives the sign (Calculator L: IF(Unwind = "Sell", +, −)).
+  // Masters such as Gearing Accelerator 40 store some Spreads negative; that must not flip a leg.
+  const negated = computeUnwind({
+    product: { ...product, legs: product.legs.map((leg) => ({ ...leg, spreads: -leg.spreads })) },
+    surface,
+    inputs: { ...base, debentures: 800 },
+  });
+  check(
+    "a negative Spreads does not flip the leg in Current Premium Outflow or the headline",
+    Math.abs(negated.currentPremOutflowPct - held.currentPremOutflowPct) < 1e-12 &&
+      Math.abs(negated.unwindQuoteRs - held.unwindQuoteRs) < 1e-6 &&
+      negated.clientIRR === held.clientIRR &&
+      negated.masterEconomics.unwindQuoteRs === held.masterEconomics.unwindQuoteRs,
+    `${negated.unwindQuoteRs} vs ${held.unwindQuoteRs}`,
+  );
+
+  // A flat spread and this app's Bid Ask table (bidAskSpread null) both lower the headline, and
+  // the headline stays the book quote under either.
+  const spreadRuns = [
+    { label: "a 0.02 Bid Ask Spread", spread: computeUnwind({ product, surface, inputs: { ...base, debentures: 800, bidAskSpread: 0.02 } }) },
+    { label: "the Bid Ask table", spread: computeUnwind({ product, surface, inputs: { ...base, debentures: 800, bidAskSpread: null } }) },
+  ];
+  for (const { label, spread } of spreadRuns) {
+    check(
+      `${label} lowers the headline Unwind Quote`,
+      spread.unwindQuotePct < held.unwindQuotePct - 0.01,
+      `${spread.unwindQuotePct} vs ${held.unwindQuotePct}`,
+    );
+    check(
+      `Current Premium Outflow Percent is the whole-book Premium Outflow / Mobilization under ${label}`,
+      Math.abs(spread.currentPremOutflowPct * product.mobilization - spread.masterEconomics.premiumOutflowRs) <
+        0.01 * spread.optionRows.length,
+      `${spread.currentPremOutflowPct * product.mobilization} vs ${spread.masterEconomics.premiumOutflowRs}`,
+    );
+    check(
+      `headline and book quote agree under ${label}`,
+      Math.abs(spread.masterEconomics.unwindQuoteRs - spread.unwindQuoteRs) < 0.05,
+      `${spread.masterEconomics.unwindQuoteRs} vs ${spread.unwindQuoteRs}`,
+    );
+    check(
+      `live Current Premium Outflow uses the side mark under ${label}, and each row keeps the spread-free mid`,
+      spread.optionRows.every(
+        (row, i) =>
+          (row.expired || row.currentPrice == null || row.currentPrice === Math.abs(row.unwindPrice)) &&
+          row.midPrice === held.optionRows[i]?.midPrice,
+      ) && spread.optionRows.some((row) => !row.expired && row.currentPrice != null),
+    );
+  }
+
+  const margined = computeUnwind({
+    product: { ...product, marginCost: 0.06 },
+    surface,
+    inputs: { ...base, debentures: 800 },
+  });
+  const me = margined.masterEconomics;
+  const residualMarginRs = roundDeskMoney(
+    product.mobilization * 0.06 * (margined.residualTenor / product.tenorDays),
+  );
+  check(
+    "Unwind Value adds the residual margin (Main Master AU)",
+    residualMarginRs > 0 &&
+      Math.abs(me.unwindValueRs - (me.grownValueRs + me.premGrownValueRs + me.premiumOutflowRs + residualMarginRs)) < 0.02,
+    `${me.unwindValueRs} vs residual ${residualMarginRs}`,
+  );
+  check(
+    "margin-cost book quote equals the headline Unwind Quote Amount",
+    Math.abs(me.unwindQuoteRs - margined.unwindQuoteRs) < 0.05,
+    `${me.unwindQuoteRs} vs ${margined.unwindQuoteRs}`,
+  );
+}
+
+// 1c. Product Book prices the whole issue even when Mobilization / Face is fractional.
+{
+  const fractional = (multiSeed as unknown as ProductMaster[]).find(
+    (p) => p.faceValue > 0 && Math.abs(p.mobilization / p.faceValue - Math.round(p.mobilization / p.faceValue)) > 0.01,
+  );
+  check("multi seed has a fractional issue size", fractional != null, fractional?.productName ?? "");
+  if (fractional) {
+    const result = computeUnwind({
+      product: fractional,
+      surface,
+      inputs: { debentures: wholeIssueDebentures(fractional), unwindDate: deskTodayISO(), spot: 23000, expirySpots: undefined },
+    });
+    check(
+      "Product Book Unwind Quantity is the Required Quantity",
+      wholeIssueDebentures(fractional) === fractional.mobilization / fractional.faceValue &&
+        result.optionRows.every((row) => row.quantity === row.issueQuantity),
+      `${fractional.productName} ${wholeIssueDebentures(fractional)}`,
+    );
+  }
 }
 
 // 2. Expired leg via priceLeg: sell and buy are 0; delta 0
@@ -650,12 +806,13 @@ check("Nifty code without Sensex stays Nifty", underlyingFromProductName("Dual B
     const clean = computeUnwind({
       product: p1684,
       surface: septemberSurface,
-      inputs: { debentures: 1, unwindDate: "2026-08-17", spot: 24366 },
+      // Spread 0: the Excel Main Master figure is at its own Bid/offer of 0.
+      inputs: { debentures: 1, unwindDate: "2026-08-17", spot: 24366, bidAskSpread: 0 },
     });
     const pastedTwice = computeUnwind({
       product: { ...p1684, legs: [...p1684.legs, ...p1684.legs] },
       surface: septemberSurface,
-      inputs: { debentures: 1, unwindDate: "2026-08-17", spot: 24366 },
+      inputs: { debentures: 1, unwindDate: "2026-08-17", spot: 24366, bidAskSpread: 0 },
     });
     check(
       "1684 deduped quote is lower than pricing the pasted block twice",

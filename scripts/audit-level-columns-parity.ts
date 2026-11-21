@@ -34,7 +34,10 @@ const seed = toPlainProduct(productSeed as ProductMaster);
 const golden = computeUnwind({ product: seed, surface, inputs: goldenInputs });
 
 // New Primary observation dates on 961 (23-Feb-2027 first expiry) + ROUND marks.
-check("golden quote pct locked", Math.abs(golden.unwindQuotePct - 1.4718016624926513) < 1e-9, String(golden.unwindQuotePct));
+const goldenNoSpread = computeUnwind({ product: seed, surface, inputs: { ...goldenInputs, bidAskSpread: 0 } });
+check("golden quote pct locked", Math.abs(goldenNoSpread.unwindQuotePct - 1.4718016624926513) < 1e-9, String(goldenNoSpread.unwindQuotePct));
+// Calculator Current Price is the Main Master Unwind Price (bid or offer side), so 1% moves the quote.
+check("golden quote at 1% Bid Ask Spread", Math.abs(golden.unwindQuotePct - 1.3031609700210602) < 1e-9, String(golden.unwindQuotePct));
 check("golden uses Contingent Level", golden.contingentLevel === seed.contingentLevel, String(golden.contingentLevel));
 check("golden exposes Initial Underlying Level", golden.initialNiftyLevel === seed.initialNiftyLevel, String(golden.initialNiftyLevel));
 check("golden leg0 prdPremium", Math.abs((golden.optionRows[0]?.prdPremium ?? 0) - 283988423.1908789) < 2000);

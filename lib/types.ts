@@ -103,8 +103,17 @@ export type OptionTableRow = {
   original: string;
   unwind: string;
   expiry: string;
+  /** Unwind Quantity: Required Quantity scaled to the typed Number of Debentures. */
   quantity: number;
+  /** Required Quantity on the whole issue (Main Master Req. Quantity). */
+  issueQuantity: number;
+  /** Calculator Current Price: the side mark (Main Master AB) while live, intrinsic once expired. */
   currentPrice: number | null;
+  /**
+   * Active Management only: the Pricer mid, no Bid Ask spread (0 once expired). Expected
+   * Difference reads it, since nothing is unwound at maturity.
+   */
+  midPrice: number;
   /** Calculator signed premium used for Current Premium Outflow percent. */
   premium: number | null;
   /** Product Master Product Price — the Options Book Product Premium Per Spread, unsigned. */
@@ -117,7 +126,7 @@ export type OptionTableRow = {
   prdPremium: number;
   /** Dynamic full-column BS unwind price (Master Unwind Prices). */
   unwindPrice: number;
-  /** Dynamic full-column Premium Outflow Rs = UnwindPrice × ReqQuantity. */
+  /** Premium Outflow Amount on the typed holding = Unwind Price × Unwind Quantity. */
   premiumOutflowRs: number;
   /** True when τ ≤ 0 on the unwinding date (desk expired-put rules apply). */
   expired: boolean;
@@ -126,6 +135,7 @@ export type OptionTableRow = {
 /** Whole-book rupee economics, computed dynamically. */
 export type MasterEconomics = {
   premiumCreditedRs: number;
+  /** Whole issue: Σ Unwind Price × Required Quantity (Main Master Premium outflow). */
   premiumOutflowRs: number;
   amtWithNbfcRs: number;
   grownValueRs: number;

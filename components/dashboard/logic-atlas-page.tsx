@@ -128,7 +128,7 @@ const MODULES: LogicModule[] = [
     insights: [
       "Product Premium uses the per-leg Product Price from the Product Master, not a single product-level mark.",
       "Unwind Price is the pricer Buy mark when unwinding a sell, and the Sell mark when unwinding a buy.",
-      "Options Book Premium Outflow is holding-scaled quantity times the Pricer buy or sell mark. Product Premium stays on Required Quantity.",
+      "Options Book Premium Outflow Amount is holding-scaled quantity times the Pricer buy or sell mark. The Premium Outflow card is that mark times Required Quantity on the whole issue, so the number of debentures typed does not move it. Product Premium stays on Required Quantity.",
       "An expired Sell put uses put intrinsic on the Options Book; that cash enters Premium Outflow / Unwind Value / quote. Pricer stays 0 after expiry.",
       "Expired Pricer legs show IV 0 with delta zero and no bid-ask shift.",
     ],
@@ -153,7 +153,7 @@ const MODULES: LogicModule[] = [
         kind: "process",
         label: "Mark per leg",
         description:
-          "The price times the number of spreads is shared across legs that match on type, strike, and spreads. An unwind buy is an outflow.",
+          "The unwind price, the Pricer buy or sell mark so the Bid Ask Spread counts, times the number of spreads, taken as a size, is shared across legs that match on type, strike, and spreads. An unwind buy is an outflow.",
       },
       {
         id: "prem-sum",
@@ -187,8 +187,8 @@ const MODULES: LogicModule[] = [
     insights: [
       "NBFC Grown Value is a dual future-value: NBFC amount at the Product Discounting Rate plus margin funds at the margin funding rate.",
       "Premium Credited is the premium fraction of mobilization and grows at the Premium Discounting Rate.",
-      "Unwind Value adds NBFC Grown Value, Premium Grown Value and the live Premium Outflow.",
-      "Dividing Unwind Value by the total number of debentures recovers the whole-book unwind quote amount.",
+      "Unwind Value adds NBFC Grown Value, Premium Grown Value, the whole-issue Premium Outflow and the unused margin.",
+      "Dividing Unwind Value by the total number of debentures recovers the whole-book unwind quote amount, whatever holding is typed.",
     ],
     outputs: [
       "Amount with NBFC Rupees",
@@ -233,7 +233,7 @@ const MODULES: LogicModule[] = [
         kind: "output",
         label: "Book unwind value",
         description:
-          "Grown NBFC holding plus grown premium plus today's option outflow. Divided by the number of debentures, this matches Face Value times the Unwind Quote.",
+          "Grown NBFC holding plus grown premium plus today's option outflow on the whole issue plus unused margin. Divided by the number of debentures in issue, this matches Face Value times the Unwind Quote when Required Quantity follows Spreads.",
       },
     ],
   },

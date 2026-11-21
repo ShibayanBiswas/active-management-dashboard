@@ -28,7 +28,7 @@ Code:
 | Actual Target | Target Nifty on the New Primary product master; else the highest strike among the originally sold Puts | Baked into `lib/data/am-targets-seed.json` by `npm run bake:am-targets`. Sensex rows carry their Sensex-scale target in the same field |
 | Effective Target | (Actual Target × Total − Σ passed closes) ÷ Observations Left | Equals the Actual Target before the first observation; "-" when nothing is left or a passed close is missing |
 | Bid Ask spread s | By the leg's expiry: 0.75 volatility points through 31-Mar-2027, 0.5 through 31-Mar-2028, 0.375 through 31-Mar-2029, 0.25 through 31-Mar-2030, then 0.075 | `lib/data/bid-ask-seed.json`. An option originally sold is unwound at surface volatility + s, one originally bought at surface volatility − s, as in the workbook's pricing sheet. Expired legs take none |
-| Exit Value | Book unwind value with the side marks, plus simple interest at the premium discount rate on settled option cash from each expiry to the valuation date | Workbook Calculator BH (F + H + J + K) with its AZ term, in rupees for the whole issue. The Unwinding tabs keep their own Unwind Value, which has no carry term |
+| Exit Value | Unwinding's Unwind Value (Main Master AU: grown values + Σ side mark × Required Quantity + the residual-margin refund), plus simple interest at the premium discount rate on settled option cash from each expiry to the valuation date | Workbook Calculator BH (F + H + J + K) with its AZ term, in rupees for the whole issue. BH has no margin term because no workbook product carries a Margin Cost; the app deducts Margin Cost in the grown value (Main Master AR), so it keeps AU's refund of the unearned part. The Unwinding tabs keep their own Unwind Value, which has no carry term |
 | Current Internal Rate of Return | min(rate on Exit Value ÷ debentures over the invested days, Product Internal Rate of Return) at today's spot | Workbook Summary G. "-" when invested days are 0 or the book quote is at or below zero |
 | Expected Level | The Nifty or Sensex Spot Level edited on the Unwinding Calculator; today's spot otherwise | There is no separate assumed-level input. An edit re-prices the book's Expected figures after a short pause |
 | Expected Internal Rate of Return | Current IRR's formula at the Expected Level | Full re-price, not the workbook's delta shortcut. It equals Current IRR at today's spot |
@@ -68,7 +68,9 @@ Why each term:
   - The mid-marked book grows to about 1.41 × mobilization over the average 2.8 years left. That leaves Expected Difference at −0.60 × mobilization: a real figure, not a unit slip.
   - Exit Value sits lower than the mid-marked value because the Bid Ask table marks every live leg against the desk, ₹4,932 crore that day.
   - Nifty Accelerator 705's legs have all settled. Its Expected Difference of ₹−32.20 crore is its ₹−31.11 crore of settled put-spread cash carried to maturity: Assets at T equal its payout to the rupee.
-- **Whole issue.** `computeUnwind` sizes option cash to the debentures it ran on, while the grown values and the payout are always the whole issue. Expected Difference, Exit Value and the book IRRs therefore scale option cash to the whole issue (`optionCashToWholeIssue`). Typing 800 of Nifty Accelerator 1596's 4,000 debentures on the Unwinding Calculator used to give an Exit Value of ₹68.57 crore against ₹27.56 crore. It also moved Current IRR from −33.2% to 15.0%.
+- **Whole issue.** The engine's rupee book is the whole issue at any typed count. Expected Difference and the AZ carry read each row's price × Required Quantity (`issueQuantity`), so Exit Value, the book IRRs and Expected Difference are the same at 1, 250, 800 or 1,500 typed debentures.
+  - Before 8b0600e, option cash followed the typed count while the grown values stayed whole issue.
+  - Typing 800 of Nifty Accelerator 1596's 4,000 debentures gave an Exit Value of ₹68.57 crore against ₹27.56 crore, and moved Current IRR from −33.2% to 15.0%.
 
 ## Home
 
@@ -129,8 +131,15 @@ Three tabs follow the original five, all priced on the exact unwind on screen.
 These are the only places this repository's engine differs from its twin:
 
 1. **Vol surface memo.** `normalizeVolSurface` keeps one normalised copy per surface object. A whole-book pass went from 72 s to 0.9 s, with identical results across 6,537 hashed checks.
-2. **Per-leg Bid Ask.** `bidAskSpread` of `null` means the table. An explicit number behaves exactly as before; every explicit-0 price is byte-identical.
-3. **Headline premium cell.** It uses the absolute number of spreads, so a sold leg stored with a negative count is no longer double-negated. This moved 108 live headline quotes, for example NA-866's Client IRR, which had read 79.95%. Golden tests are unchanged.
+2. **Per-leg Bid Ask.** `bidAskSpread` of `null` means the table. An explicit number behaves exactly as before; every explicit-0 price is byte-identical. Since `computeUnwind` takes the side mark into the headline (Unwinding Calculator `7406a34`), blank therefore moves the headline quote too, where the twin's blank is 0.
+3. **Mid on each row.** `OptionTableRow.midPrice` keeps the spread-free Pricer mid, which only Expected Difference reads. The twin's rows have no such field.
+
+The rest of `computeUnwind` follows the twin's `7406a34`:
+- Spreads is a size in the headline and the no-quantity fallback.
+- Each row carries `issueQuantity`, the Required Quantity.
+- `masterEconomics.premiumOutflowRs` is Σ ROUND(price × Required Quantity), the whole issue (Main Master AN).
+- Live headline cells and `currentPrice` take the side mark (Calculator Current Price = Main Master AB).
+- Unwind Value adds ROUND(Mobilization × Margin Cost × residual ÷ Tenor) (Main Master AU).
 
 ## Effect of the Bid Ask table
 
@@ -139,6 +148,8 @@ On the live book on 9-Nov-2026, the table made every Premium Outflow move agains
 - **Active Management Current Internal Rate of Return:** median −8.2 points.
 
 These books hold tight put spreads, and both legs move against the desk. This is the workbook's own rule, reproduced on 346 of 346 workbook products. Typing 0 in Bid Ask Spread shows a product without it.
+
+Since 21-Nov-2026 the headline Unwind Quote Amount, Client IRR and Residual IRR take the same side marks (Calculator L11 reads Main Master AB). So on the Product Book the headline and the book quote now move together under the table, and agree wherever Required Quantity follows Spreads.
 
 ## Checks
 
@@ -149,7 +160,7 @@ These books hold tight put spreads, and both legs move against the desk. This is
   - the whole-issue basis, and the same Exit Value, Current IRR and Expected Difference at any typed count of debentures;
   - the grid centre and expired cash, a Sensex shift;
   - the scenarios route.
-- **`npm run verify:edge`:** among the edge cases, the Premium Outflow card's window sum, its `Pricing` state and a quote that failed.
+- **`npm run verify:edge`:** among the edge cases, the Premium Outflow card's window sum, its `Pricing` state and a quote that failed; the whole-issue Premium Outflow (Σ price × Required Quantity) and per-debenture figures at 1, 250, 800 and 1,500 typed debentures; a flat spread and the Bid Ask table lowering the headline, with headline = book quote under each; the residual margin in Unwind Value.
 - **`npm run verify:tally`:** the workbook reconciliation on a compact fixture, `scripts/fixtures/workbook-tally.json`.
   - Side volatilities and option marks 3,043 of 3,043.
   - Unwind IRR within 1 basis point on 346 of 346.
@@ -161,4 +172,4 @@ These books hold tight put spreads, and both legs move against the desk. This is
 - **Targets.** 369 live products are not on the New Primary master and use the top Sell Put strike as Actual Target.
 - **Product 715** has a stray 30-Apr-2026 leg: four observations where the workbook has three.
 - **Magnifier 319 and 320 Phase II** are missing two observation dates.
-- **Product 1624** has a spread count of 92. Gearing Accelerator 40 and Nifty Accelerator 956 still show a headline quote that differs from the book quote.
+- **Product 1624** has a spread count of 92. On 21-Nov-2026, 68 live products still show a headline quote more than ₹1 from the book quote, because their Required Quantity does not follow Spreads: 1624, Sensex Accelerator 141, Nifty Accelerator 1252 and 945, Gearing Accelerator 159 and Nifty Accelerator 956 differ most. Gearing Accelerator 40 now agrees.

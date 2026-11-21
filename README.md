@@ -86,8 +86,8 @@ under Desk Book → Expired. Product Book quotes load via batched server marks
 | Option discount | Discount Yield = Forward Sell Rate + 1% (seed forward 6.60% → 7.60%) |
 | Product discount | 7.50% — NBFC compounding only, never option marks |
 | Volatility | Bilinear strike × expiry interpolation on **Reference Nifty Price** or **Reference Sensex Price** × Strike Change percent (Sensex if the name or code matches Sensex / S&P BSE / BSE Sensex), plus Volatility Bump. Black–Scholes still uses the live unwind spot |
-| Bid Ask Spread | Sell at `σ − z/2`, Buy at `σ + z/2`; default `z = 0` |
-| Unwind mark | **Live:** Original Sell → Pricer Buy Price; Original Buy → Pricer Sell Price, rounded to two decimals after Black–Scholes. **Expired:** the in-the-money price from the Yahoo close on/before that leg's expiry, the same for Unwind Buy and Unwind Sell. Original Sell pays it; Original Buy receives it. Net Premium Outflow is the sum of the leg amounts and enters Unwind Value. **Pricer** stays Excel IFERROR → 0 |
+| Bid Ask Spread | Sell at `σ − z/2`, Buy at `σ + z/2`. Left blank, each leg takes the Bid Ask table (`z = 2 × s(expiry) ÷ 100`); 0 is the Unwinding Calculator default. The side marks reach the headline quote (Calculator L11 reads Main Master AB) |
+| Unwind mark | **Live:** Original Sell → Pricer Buy Price; Original Buy → Pricer Sell Price, rounded to two decimals after Black–Scholes. **Expired:** the in-the-money price from the Yahoo close on/before that leg's expiry, the same for Unwind Buy and Unwind Sell. Original Sell pays it; Original Buy receives it. Each leg amount is that price × Unwind Quantity (the typed holding); Net Premium Outflow is that price × Required Quantity over the whole issue (Main Master AC / AN) and enters Unwind Value. **Pricer** stays Excel IFERROR → 0 |
 
 Engine golden checks (`npm run verify:parity`, `verify:pricer`) replay Nifty Accelerator -
 961 on the frozen September 2026 surface (`lib/data/vol-surface-golden-sep-2026.json`;

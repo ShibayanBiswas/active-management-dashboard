@@ -4,6 +4,41 @@ Newest first. Each entry lists what changed, why, and where. Historical notes ar
 they were written on that day (a later entry may restyle something an earlier entry
 introduced).
 
+## 2026-11-21 — Engine follows Unwinding Calculator 7406a34: whole-issue book, side marks in the headline, residual margin
+
+`computeUnwind` and `OptionTableRow` take the Unwinding Calculator's `7406a34` changes:
+- Spreads is a size, in the headline cells and the no-quantity fallback.
+- Each row carries `issueQuantity` (Required Quantity).
+- `masterEconomics.premiumOutflowRs` is Σ ROUND(price × Required Quantity), the whole issue (Main Master AN), whatever count is typed.
+- The headline cell and `currentPrice` take the side mark (Calculator Current Price = Main Master AB).
+- Unwind Value adds ROUND(Mobilization × Margin Cost × residual ÷ Tenor) (Main Master AU).
+
+What this app does differently:
+- **Blank Bid Ask Spread.** It means the Bid Ask table here, so the table now reaches the headline Unwind Quote Amount, Client IRR and Residual IRR.
+- **Mid on each row.** Rows keep the spread-free mid (`midPrice`) for Expected Difference, which reads mid marks.
+
+Active Management layer:
+- `bookValue` no longer adds `(scale − 1) × premiumOutflowRs`. The engine's Unwind Value is already whole issue.
+- The AZ carry and Expected Difference read price × `issueQuantity`, so `optionCashToWholeIssue` is gone.
+- **Exit Value keeps the residual-margin term.** Workbook BH = F + H + J + K has none, but no workbook product carries a Margin Cost. The app deducts Margin Cost in the grown value (Main Master AR), so it keeps AU's refund of the unearned part.
+
+On 21-Nov-2026 (Nifty 25,800.60, 2,161 live products), against the previous engine on the same day:
+- **Unwind Quote Amount** moved on 1,941 products: median −14.0%, tenth percentile −34.5%.
+  - It now equals the book quote within ₹1 on 2,093 products, against 196 before.
+  - Nifty Accelerator 1596: ₹1,11,261.73 → ₹70,913.83.
+  - Gearing Accelerator 274: ₹96,902.21 → ₹64,858.57.
+  - Nifty Maximizer 56: ₹1,01,445.84 → ₹82,081.59.
+  - Post Observation Analytics rows have no live leg and do not move.
+- **Total Exit Value** moved by +₹31,15,348.00, the residual margin on the three products with a Margin Cost:
+
+  | Product | Change |
+  |---|---|
+  | Nifty Accelerator 770 | +₹23,07,228 |
+  | Nifty Magnifier 643 | +₹5,17,560 |
+  | Gearing Accelerator 40 | +₹2,90,560 |
+
+- **Unchanged:** Total Mobilization, the Premium Outflow column and card, and Expected Difference. 8b0600e had already put the Product Book and these figures on the whole issue.
+
 ## 2026-11-16 — Totals strip without Expected Difference, whole-issue Active Management figures, Premium Outflow card states
 
 The owner asked for the Total Expected Difference card to be removed, and for Premium Outflow,

@@ -617,21 +617,35 @@ const sample = [
   check("explicit 0: Sell = Mid = Buy with Bid Offer 0, and the same mid and vol as the table", zeroFlat === legs, `${zeroFlat} of ${legs}`);
   check("a flat spread (0 or 0.02) prices exactly as the old formula", rebuiltLegs > 0 && rebuilt === rebuiltLegs, `${rebuilt} of ${rebuiltLegs}`);
 
-  // The unwind: the headline quote is mid-based, so only the book's option cash takes the spread.
-  let same = 0;
+  // The unwind: Calculator Current Price is the side mark (Main Master AB), so the table moves the
+  // headline quote with the book; the mid stays on each row for Expected Difference.
+  let lowered = 0;
   let adverse = 0;
   let marks = 0;
   for (const p of products) {
     const inputs = { ...productBookInputs(p, { unwindDate: AS_OF, nifty: NIFTY, sensex: SENSEX }), expirySpots: inputsFor(p).expirySpots };
     const t = computeUnwind({ product: p, surface, inputs });
     const z = computeUnwind({ product: p, surface, inputs: { ...inputs, bidAskSpread: 0 } });
-    if (t.unwindQuoteRs === z.unwindQuoteRs && t.clientIRR === z.clientIRR && t.bidAskSpread === null && z.bidAskSpread === 0) same += 1;
+    const live = t.optionRows.some((row) => !row.expired && (row.currentPrice ?? 0) >= 1);
+    if (
+      t.bidAskSpread === null &&
+      z.bidAskSpread === 0 &&
+      (live ? t.unwindQuoteRs < z.unwindQuoteRs : t.unwindQuoteRs === z.unwindQuoteRs) &&
+      t.optionRows.every((row) => row.expired || row.currentPrice === null || row.currentPrice === Math.abs(row.unwindPrice)) &&
+      t.optionRows.every((row, i) => row.midPrice === z.optionRows[i]!.midPrice)
+    ) {
+      lowered += 1;
+    }
     if (t.masterEconomics.premiumOutflowRs <= z.masterEconomics.premiumOutflowRs) adverse += 1;
     const pricer = priceProductBook({ product: p, spot: t.spot, valuationDate: AS_OF, surface, underlying: inputs.underlying as UnderlyingIndex });
     const sideMark = (i: number, original: string) => (/^s/i.test(original) ? pricer[i]!.buyPrice : pricer[i]!.sellPrice);
     if (t.optionRows.every((row, i) => row.expired || Math.abs(row.unwindPrice) === sideMark(i, row.original))) marks += 1;
   }
-  check("Bid Ask table leaves the headline quote and Client IRR as they are", same === products.length, `${same} of ${products.length}`);
+  check(
+    "Bid Ask table lowers the headline quote through the side marks, and leaves each row's mid as at 0",
+    lowered === products.length,
+    `${lowered} of ${products.length}`,
+  );
   check("Bid Ask table only ever lowers Premium Outflow", adverse === products.length, `${adverse} of ${products.length}`);
   check("Options Book marks are the table Buy (original Sell) and Sell (original Buy) prices", marks === products.length, `${marks} of ${products.length}`);
   check(
@@ -793,9 +807,9 @@ function quoteBasis(p: ProductMaster, closes: (day: string) => number): UnwindIn
   );
 }
 
-// Whole issue. The Product Book prices Mobilization ÷ Face Value unrounded, and Exit Value, Current
-// IRR and Expected Difference do not move with the debentures an unwind ran on: computeUnwind sizes
-// option cash to them while its grown values and the payout are always the whole issue.
+// Whole issue. The Product Book prices Mobilization ÷ Face Value unrounded, and the engine's rupee
+// book (Main Master AN, AU) is the whole issue whatever count is typed, so Exit Value, Current IRR
+// and Expected Difference do not move with the debentures an unwind ran on.
 {
   const basis = { unwindDate: AS_OF, nifty: NIFTY, sensex: SENSEX };
   const fractional = book.filter((p) => !Number.isInteger(p.mobilization / p.faceValue));
@@ -815,39 +829,33 @@ function quoteBasis(p: ProductMaster, closes: (day: string) => number): UnwindIn
     named("Gearing Sensex Accelerator - 22"),
   ];
   let steady = 0;
-  let mixedBefore = 0;
   const lines: string[] = [];
   for (const p of sample) {
     const underlying = underlyingFromProductName(p.productName, p.productCode);
     const whole = quoteBasis(p, (day) => fixedClose(day, underlying));
     const base = computeUnwind({ product: p, surface, inputs: whole });
-    const legs = base.optionRows.length;
     const baseExit = bookValue(p, base).exitValueRs;
     const baseIrr = irrSet(base, p).currentIrr;
     const baseEd = expectedDifferenceAtMaturity(p, base, surface)!;
     let same = true;
-    for (const debentures of [800, issuedCount(p), whole.debentures / 3]) {
+    for (const debentures of [1, 250, 800, 1500, issuedCount(p), whole.debentures / 3]) {
       const r = computeUnwind({ product: p, surface, inputs: { ...whole, debentures } });
-      const scale = whole.debentures / debentures;
-      // Each leg's cash is rounded to the paisa at the typed count, then taken to the whole issue.
-      const paisa = 0.01 * (legs + 1) * Math.max(scale, 1);
-      const irr = irrSet(r, p).currentIrr;
       if (
-        Math.abs(bookValue(p, r).exitValueRs - baseExit) > paisa ||
-        Math.abs(expectedDifferenceAtMaturity(p, r, surface)! - baseEd) > 2 * paisa ||
-        (irr == null) !== (baseIrr == null) ||
-        (irr != null && Math.abs(irr - baseIrr!) > 1e-6)
+        r.masterEconomics.premiumOutflowRs !== base.masterEconomics.premiumOutflowRs ||
+        r.masterEconomics.unwindValueRs !== base.masterEconomics.unwindValueRs ||
+        bookValue(p, r).exitValueRs !== baseExit ||
+        expectedDifferenceAtMaturity(p, r, surface) !== baseEd ||
+        irrSet(r, p).currentIrr !== baseIrr
       ) {
         same = false;
       }
-      if (debentures === 800 && Math.abs(r.masterEconomics.unwindValueRs - base.masterEconomics.unwindValueRs) > 1) mixedBefore += 1;
     }
     if (same) steady += 1;
     lines.push(`${p.productName.trim()} Exit ${baseExit.toFixed(2)} ED ${baseEd.toFixed(2)}`);
   }
   check(
-    "Exit Value, Current IRR and Expected Difference are the whole issue's at 800, the rounded and a third of the debentures",
-    steady === sample.length && mixedBefore === sample.length,
+    "Exit Value, Current IRR and Expected Difference are the whole issue's at 1, 250, 800, 1,500, the rounded and a third of the debentures",
+    steady === sample.length,
     `${steady} of ${sample.length}; ${lines.join("; ")}`,
   );
 }

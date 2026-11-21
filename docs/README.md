@@ -12,7 +12,7 @@ product desk removed.
 | # | Document | What it covers |
 |---|----------|----------------|
 | 01 | [Architecture](01-architecture.md) | Runtime picture, API contracts, engine modules, types, folder map, stack |
-| 02 | [Unwind Quote and Whole-Book Economics](02-calculation-logic.md) | Five output tabs, live marks + expired in-the-money prices, net Premium Outflow as the sum of the leg amounts, Options Book bold/faint, quantity rules, golden sample, Excel Unwind Diff audit |
+| 02 | [Unwind Quote and Whole-Book Economics](02-calculation-logic.md) | Five output tabs, live marks + expired in-the-money prices, net Premium Outflow as price × Required Quantity on the whole issue, Options Book bold/faint, quantity rules, golden sample, Excel Unwind Diff audit |
 | 03 | [Pricer Table](03-pricer-logic.md) | Fourteen columns, interpolation, discount-yield convention, Black–Scholes floored at 0, expired IV = 0, Pricer Excel 0 vs Options Book intrinsic in the quote |
 | 04 | [Input files and upload](04-input-files.md) | Both workbooks (28-column Product Master Excel, collated FY21–FY27 multi book 2,505 / 79,190), clean sample styling, live formulas, parser aliases, open upload |
 | 05 | [MongoDB and seeding](05-mongodb-and-seed.md) | Collections (including `multi_products`), document shapes, env vars, collate / bake / seed / fallback order, ongoing vs expired as-of (2,207 live on 2026-10-17) |

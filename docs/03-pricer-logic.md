@@ -315,14 +315,15 @@ the same whether the unwind action is Buy or Sell. A put is max(strike − spot,
 is max(spot − strike, 0). The spot is the Yahoo close on or before that leg's own expiry.
 Original Sell pays it. Original Buy receives it as a positive inflow. Same strike and the
 same expiry spot produce the same price. Each leg's cash is that price times the Unwind
-Quantity on the row. Net Premium Outflow is the sum of every leg's cash, live marks
-included, and that sum enters Unwind Value. Out-of-the-money expired options stay 0.
+Quantity on the row. Net Premium Outflow is the same price times Required Quantity on
+the whole issue, live marks included, and that sum enters Unwind Value. Out-of-the-money
+expired options stay 0.
 
 | Surface | Expired in-the-money option | Expired out-of-the-money |
 |---------|-----------------------------|--------------------------|
 | Pricer Table | price / IV / rates = **0** | **0** |
 | Options Book table | in-the-money price × Unwind Quantity (bold). Sell pays. Buy receives. | **0** (faint) |
-| Net Premium Outflow / Unwind Value | sum of every leg's Premium Outflow Amount | expired legs contribute **0** |
+| Net Premium Outflow / Unwind Value | in-the-money price × Required Quantity (whole issue) | expired legs contribute **0** |
 
 Covered by `npm run verify:edge`.
 

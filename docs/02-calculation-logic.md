@@ -39,7 +39,10 @@ Quantity does not match the size implied by Spreads (product 1605 is the worked 
 
 The same Product Book also shows **Premium Outflow** (`masterEconomics.premiumOutflowRs`,
 the NBFC Book Values card) immediately after Client Internal Rate of Return. That card is
-the sum of every leg's Premium Outflow Amount on the same product. Each leg then shows
+Excel Main Master **Premium outflow** (column AN): every leg's unwind price times its
+Required Quantity, summed over the whole issue. The Product Book prices the whole issue
+(`wholeIssueDebentures` = Mobilization / Face, unrounded), so its Unwind Quantity is the
+Required Quantity and the card is the sum of its leg amounts. Each leg then shows
 Option Expiry Date, Product Premium Per Spread, Product Premium Amount, Unwind Option
 Price, and Premium Outflow Amount.
 
@@ -189,10 +192,10 @@ compound `pv * (1 + rate)^years`.
 | Premium Credited rupees | `PremiumFraction × Mobilization` (≥ 0) | `premiumCreditedRs` |
 | Premium Grown Value rupees | `FV(PremDisc, inv/365, −PremiumCredited)` | `premGrownValueRs` |
 | Premium Grown percent | `PremGrownRs / Mobilization` | `premiumGrownValue` |
-| Premium Outflow rupees | Sum of every leg's Premium Outflow Amount. Live legs use the Pricer unwind mark × Unwind Quantity. Expired legs use the in-the-money price × the same Unwind Quantity. Original Sell is cash out. Original Buy is cash in. | `premiumOutflowRs` |
-| Unwind Value rupees | `Grown + PremGrown + PremiumOutflow` (live marks + expired intrinsic) | `unwindValueRs` |
+| Premium Outflow rupees | Whole issue, Main Master AC / AN: Σ ROUND(unwind price × Required Quantity, 2). Live legs use the Pricer unwind mark. Expired legs use the in-the-money price. Original Sell is cash out. Original Buy is cash in. The typed Number of Debentures does not move it | `premiumOutflowRs` |
+| Unwind Value rupees | `Grown + PremGrown + PremiumOutflow + Mobilization × MarginCost × residual / Tenor` (Main Master AU; the margin term is 0 unless the product carries a Margin Cost) | `unwindValueRs` |
 | Unwind Quote rupees (book) | `UnwindValue / TotalDebentures` | `masterEconomics.unwindQuoteRs` |
-| Current Premium Outflow percent | Sum of signed live leg premiums / ContingentLevel, plus expired in-the-money intrinsic. Sell is negative. Buy is positive. | `currentPremOutflowPct` |
+| Current Premium Outflow percent | Calculator L11: Σ ± (unwind price × \|Spreads\| / COUNTIFS) / ContingentLevel, plus expired in-the-money intrinsic. The live price is the Pricer side mark (Main Master AB), so the Bid Ask Spread moves it. Unwind Buy is negative. Unwind Sell is positive: the side gives the sign and Spreads is a size, so a master that stores Spreads negative does not flip the leg. | `currentPremOutflowPct` |
 | Residual margin add-on | `MarginCost × max(Tenor − Invested, 0) / Tenor` | part of pricer unwind |
 | Pricer Unwind Value | `NBFCGrown% + PremGrown% + PremOutflow% + residual margin` | `pricerUnwindValue` |
 | Unwind Quote percent | Equals Pricer Unwind Value | `unwindQuotePct` |
@@ -270,7 +273,7 @@ so Initial Underlying Level is `result.initialNiftyLevel`, not a second lookup.
 | NBFC Grown Value Rupees | `grownValueRs` |
 | Premium Credited | `premiumCreditedRs` |
 | Premium Grown Value Rupees | `premGrownValueRs` |
-| Premium Outflow | `premiumOutflowRs` (sum of the Options Book Premium Outflow Amount column) |
+| Premium Outflow | `premiumOutflowRs` (whole issue: Σ unwind price × Required Quantity) |
 | Unwind Value | `unwindValueRs` |
 | Book Unwind Per Debenture | `unwindValueRs / totalDebs` |
 
@@ -327,8 +330,11 @@ Outflow Amount** is the option price times that same Unwind Quantity. A live pri
 Pricer unwind mark. An expired price is the in-the-money amount, and it does not change
 when the unwind action is Buy or Sell: a put is max(strike − spot, 0), a call is
 max(spot − strike, 0). Original Sell pays it (negative). Original Buy receives it
-(positive). The product Premium Outflow card is the sum of those leg amounts, and that
-sum enters Unwind Value. **Product Premium Amount** stays on unscaled Required Quantity
+(positive). The Options Book column is the cash on the typed holding. The NBFC Book
+Values Premium Outflow card is the whole issue: the same price times unscaled Required
+Quantity (Main Master AC / AN), so the column sums to that card × holding / issued.
+Only the whole-issue card enters Unwind Value, so Book Unwind Per Debenture does not move
+with the typed holding. **Product Premium Amount** stays on unscaled Required Quantity
 for Main Master parity.
 
 Lot Round Off rounds Unwind Quantity to the nearest exchange lot of **75** (sign preserving):
@@ -344,9 +350,9 @@ Required Quantity = IF(Side = "Sell", −1, 1)
 
 Product Premium Amount stays on Required Quantity (Main Master). Premium Outflow Amount
 **on the Options Book** is the live Pricer unwind mark, or the expired in-the-money price,
-times the Unwind Quantity on that row. Net Premium Outflow is the sum of those amounts.
-It is not a second pass over unscaled Required Quantity, and expired cash is not lot-rounded
-away from the quantity the row shows. **Pricer Table** still stores **0** after expiry
+times the Unwind Quantity on that row. Net Premium Outflow on the NBFC Book is the same
+price times Required Quantity, summed over the whole issue (`row.issueQuantity`). Expired
+cash is not lot-rounded on either. **Pricer Table** still stores **0** after expiry
 (Excel IFERROR). Out-of-the-money expired options stay 0.
 
 ### Unwind Side
@@ -367,7 +373,9 @@ Premium per Spread = |leg.prdPrice ?? product.prdPrice|
 
 Marks below `0.005` display as blank (`—`). The Calculator sheet's signed split
 `± (CurrentPrice × Spreads) / COUNTIFS` still feeds Current Premium Outflow percent on the
-headline quote. It is not shown on the Options Book.
+headline quote. Calculator Current Price is the Main Master Unwind Price (column AB), the
+Pricer Buy mark on an unwind Buy and the Sell mark on an unwind Sell, not the mid. It is
+not shown on the Options Book.
 
 ### Product Premium
 
@@ -396,15 +404,17 @@ Original Sell pays (negative). Original Buy receives (positive).
 OTM expired options are 0. Same strike on two expiries can differ when the index moved.
 PremiumOutflowAmount  = ROUND(in-the-money price × Unwind Quantity, 2)
 
-Net Premium Outflow on the product card, Unwind Value, and the book quote:
-NetPremiumOutflow     = ROUND(sum of every leg's PremiumOutflowAmount, 2)
+Net Premium Outflow on the product card, Unwind Value, and the book quote (whole issue):
+NetPremiumOutflow     = ROUND(sum of every leg's ROUND(price × Required Quantity, 2), 2)
+UnwindValue           = Grown + PremGrown + NetPremiumOutflow
+                        + ROUND(Mobilization × MarginCost × residual / Tenor, 2)
 ```
 
 Excel’s Pricer lookup errors after expiry and stores **0** on Price/Sell/Buy — the desk
 **Pricer table matches that** and is not changed. On the Options Book and NBFC Premium
 Outflow, an expired option uses its intrinsic. A sold option that finishes in the money
 is cash going out. A bought option that finishes in the money is cash coming in. The
-product Premium Outflow equals the sum of those leg amounts, including the live marks.
+product Premium Outflow is those prices times Required Quantity, including the live marks.
 That counted cash is shown **prominent** (bold maroon). Expired out-of-the-money options
 stay faint zeros.
 
@@ -433,9 +443,13 @@ Computed on every leg and used by the pricer. **Not displayed** on the Options B
 
 ## Bid Ask Spread
 
-Default **0 percent**. Sell Price uses `σ − z/2`, Buy Price uses `σ + z/2`. Current Option
-Price is the unsigned mid. Unwind Option Price is the bid or offer side, shown unsigned.
-Premium Outflow Amount keeps the cash-flow sign.
+In this app the input left blank is the Bid Ask table ([11](11-active-management.md)): each
+leg takes z = 2 × s(expiry) ÷ 100. A number is one flat z for every leg; **0** is the
+Unwinding Calculator's default. Sell Price uses `σ − z/2`, Buy Price uses `σ + z/2`. Unwind Option
+Price is the bid or offer side, shown unsigned. Current Premium Outflow percent uses that
+same side price (Calculator Current Price = Main Master AB), so a wider spread lowers the
+headline Unwind Quote and the book quote together. Premium Outflow Amount keeps the
+cash-flow sign. Only Expected Difference reads each row's spread-free mid (`midPrice`).
 
 ## Default product constants
 
@@ -524,7 +538,7 @@ npm run verify:xlsm      # XLSM MarketData replay of Calculator / Master / Price
 
 | Case | Behaviour |
 |------|-----------|
-| Expired option | Price 0. Outflow 0 × quantity is added into the unwind value |
+| Expired option | Pricer price 0. Options Book and Premium Outflow use the in-the-money price at the index close on or before that expiry; out of the money is 0 |
 | Unwind on or before allotment | Invested tenor clamped to 0; IRRs and grown values stay finite |
 | Non-positive debentures or spot | API returns HTTP 400 |
 | Invalid unwinding date | API returns HTTP 400 |

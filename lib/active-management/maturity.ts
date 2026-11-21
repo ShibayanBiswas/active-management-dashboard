@@ -1,4 +1,3 @@
-import { optionCashToWholeIssue } from "@/lib/active-management/book-value";
 import { lookupFwdSellRate } from "@/lib/engine/vol-surface";
 import { postObservationFigures } from "@/lib/multi/post-observation";
 import type { ProductMaster, UnwindResult, VolSurface } from "@/lib/types";
@@ -48,17 +47,13 @@ import { daysBetween, parseISODate, roundDeskMoney } from "@/lib/utils";
  * Sign: positive means the book is worth more than the payout, the same way round as Post
  * Observation's Difference (Unwind Amount − Expected Amount), which compares a value today with a
  * payout at maturity instead. At an expected level, the live legs' mids come from the unwind at
- * that level. Whole issue throughout: computeUnwind sizes option cash to the debentures it ran on,
- * so that cash is taken to the whole issue (optionCashToWholeIssue) before it meets the grown
- * values and the payout. Null when mobilization or face value is not positive, or a figure is not
- * finite.
+ * that level. Whole issue throughout: option cash is each row's price × Required Quantity
+ * (issueQuantity), like the grown values and the payout, whatever number of debentures the unwind
+ * was typed with. Null when mobilization or face value is not positive, or a figure is not finite.
  */
 export function expectedDifferenceAtMaturity(
   product: ProductMaster,
-  result: Pick<
-    UnwindResult,
-    "masterEconomics" | "investedTenorDays" | "residualTenor" | "optionRows" | "unwindDate" | "debentures" | "totalDebs"
-  >,
+  result: Pick<UnwindResult, "masterEconomics" | "investedTenorDays" | "residualTenor" | "optionRows" | "unwindDate">,
   surface: VolSurface,
 ): number | null {
   if (!(product.mobilization > 0) || !(product.faceValue > 0)) return null;
@@ -81,19 +76,17 @@ export function expectedDifferenceAtMaturity(
     const expiry = parseISODate(row.expiry);
     const carry = g(product.premDiscRate, daysBetween(expiry, maturity));
     if (row.expired) {
-      optionCashAtMaturity += row.premiumOutflowRs * carry;
+      // Settled cash on the whole issue: an expired row's unwindPrice is its intrinsic.
+      optionCashAtMaturity += roundDeskMoney(row.unwindPrice * row.issueQuantity) * carry;
       continue;
     }
-    // The z = 0 Options Book cash: currentPrice is the mid (null when it rounds to 0.00).
-    const midCash = roundDeskMoney((row.currentPrice ?? 0) * row.quantity);
+    // The z = 0 cash on the whole issue: the spread-free mid × Required Quantity.
+    const midCash = roundDeskMoney(row.midPrice * row.issueQuantity);
     const tau = daysBetween(valuation, expiry) / 365;
     const q = lookupFwdSellRate(surface.pricingParams, expiry) + 0.01;
     optionCashAtMaturity += midCash * Math.exp(q * tau) * carry;
   }
 
-  const difference =
-    assetsAtMaturity +
-    optionCashAtMaturity * optionCashToWholeIssue(result) -
-    postObservationFigures(product, null).expectedAmount;
+  const difference = assetsAtMaturity + optionCashAtMaturity - postObservationFigures(product, null).expectedAmount;
   return Number.isFinite(difference) ? roundDeskMoney(difference) : null;
 }
